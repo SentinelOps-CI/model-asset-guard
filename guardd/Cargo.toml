@@ -1,0 +1,38 @@
+[package]
+name = "guardd"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "guardd"
+crate-type = ["cdylib", "staticlib"]
+
+[[bin]]
+name = "gen_perfect_hash"
+path = "src/bin/gen_perfect_hash.rs"
+
+[dependencies]
+sha2 = "0.10"
+hex = "0.4"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+memmap2 = "0.9"
+libc = "0.2"
+rand = "0.8"
+tempfile = "3.8"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+libc = "0.2"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+winapi = { version = "0.3", features = ["memoryapi", "handleapi", "fileapi"] }
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true 
