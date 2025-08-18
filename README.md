@@ -119,7 +119,7 @@ model-asset-guard/
 
 ```bash
 # Clone the repository
-git clone https://github.com/SentinelOps-Remote-CI/model-asset-guard.git
+git clone https://github.com/SentinelOps-CI/model-asset-guard.git
 cd model-asset-guard
 
 # Build Lean specifications
