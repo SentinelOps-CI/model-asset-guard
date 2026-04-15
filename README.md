@@ -1,15 +1,20 @@
+<div align="center">
+    
 # Model Asset Guard
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Lean 4](https://img.shields.io/badge/Lean-4%20stable-blue.svg)](https://leanprover.github.io/)
 [![Rust](https://img.shields.io/badge/Rust-stable-orange.svg)](https://www.rust-lang.org/)
 [![Python](https://img.shields.io/badge/Python-3.11+-green.svg)](https://www.python.org/)
-[![CI/CD](https://github.com/fraware/model-asset-guard/workflows/Model%20Asset%20Guard%20CI/badge.svg)](https://github.com/fraware/model-asset-guard/actions)
 
 > **Machine-verified integrity for fixed model artifacts**  
 > Weights, quantization constraints, and tokenizer behavior validated from formal spec to runtime checks.
 
 Model Asset Guard combines Lean 4 formal specifications with a Rust runtime sidecar and language bindings so teams can verify artifact integrity as part of normal model delivery.
+
+</div>
+
+---
 
 ## Why Model Asset Guard
 
