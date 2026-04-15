@@ -12,7 +12,7 @@ name = "gen_perfect_hash"
 path = "src/bin/gen_perfect_hash.rs"
 
 [dependencies]
-sha2 = "0.10"
+sha2 = "0.11"
 hex = "0.4"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
