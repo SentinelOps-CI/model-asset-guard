@@ -1,7 +1,7 @@
 # Rust
 /target/
+src/rust/guardd/target/
 **/*.rs.bk
-Cargo.lock
 
 # Python
 __pycache__/
@@ -72,11 +72,13 @@ bench/
 *.so
 *.dylib
 *.bin
-*.lock
 
 # Ignore release info and test result files
 release-info.txt
 test_results.json
 perfect_hash_test_results.json
+benchmark_results.txt
+coverage.xml
+verification_report.md
 
 # Do not ignore documentation, source code, or configuration files 

@@ -14,17 +14,14 @@ Requirements:
 
 import os
 import json
-import hashlib
 import tempfile
 import ctypes
 import ctypes.util
-from pathlib import Path
 from typing import Dict, List, Optional, Union, Any, Tuple
 import warnings
 
 # Try to import optional dependencies
 try:
-    import torch
     import numpy as np
     from transformers import (
         PreTrainedModel,
@@ -70,12 +67,12 @@ class ModelAssetGuard:
         if lib_path is None:
             # Search for library in common locations
             search_paths = [
-                "./guardd/target/release/libguardd.so",
-                "./guardd/target/debug/libguardd.so",
+                "./src/rust/guardd/target/release/libguardd.so",
+                "./src/rust/guardd/target/debug/libguardd.so",
                 "./target/release/libguardd.so",
                 "./target/debug/libguardd.so",
-                "./guardd/target/release/guardd.dll",
-                "./guardd/target/debug/guardd.dll",
+                "./src/rust/guardd/target/release/guardd.dll",
+                "./src/rust/guardd/target/debug/guardd.dll",
                 "./target/release/guardd.dll",
                 "./target/debug/guardd.dll",
                 ctypes.util.find_library("guardd"),
@@ -88,7 +85,7 @@ class ModelAssetGuard:
             else:
                 raise FileNotFoundError(
                     "Could not find libguardd library. Please build the Rust sidecar first:\n"
-                    "cargo build --release --manifest-path guardd/Cargo.toml"
+                    "cargo build --release --manifest-path src/rust/guardd/Cargo.toml"
                 )
 
         try:

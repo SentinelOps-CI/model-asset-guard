@@ -45,12 +45,12 @@ class ModelAssetGuard {
         if (!libPath) {
             // Search for library in common locations
             const searchPaths = [
-                './guardd/target/release/libguardd.so',
-                './guardd/target/debug/libguardd.so',
+                './src/rust/guardd/target/release/libguardd.so',
+                './src/rust/guardd/target/debug/libguardd.so',
                 './target/release/libguardd.so',
                 './target/debug/libguardd.so',
-                './guardd/target/release/guardd.dll',
-                './guardd/target/debug/guardd.dll',
+                './src/rust/guardd/target/release/guardd.dll',
+                './src/rust/guardd/target/debug/guardd.dll',
                 './target/release/guardd.dll',
                 './target/debug/guardd.dll'
             ];
@@ -65,7 +65,7 @@ class ModelAssetGuard {
             if (!libPath) {
                 throw new Error(
                     'Could not find libguardd library. Please build the Rust sidecar first:\n' +
-                    'cargo build --release --manifest-path guardd/Cargo.toml'
+                    'cargo build --release --manifest-path src/rust/guardd/Cargo.toml'
                 );
             }
         }
@@ -76,12 +76,12 @@ class ModelAssetGuard {
                 'guardd_verify_digest': ['int', ['string', 'pointer']],
                 'guardd_checked_load': ['pointer', ['string', 'pointer']],
                 'guardd_free_handle': ['void', ['pointer']],
-                'guardd_verify_quant_128_vectors': ['string', ['string', 'pointer', 'size_t', 'uint32', 'uint32', 'string']],
-                'guardd_verify_model_128_vectors': ['string', ['string']],
-                'guardd_run_bitflip_corpus_test': ['string', ['size_t', 'size_t', 'string']],
-                'guardd_free_json_result': ['void', ['string']],
-                'guardd_perfect_hash_encode': ['string', ['string', 'string']],
-                'guardd_perfect_hash_decode': ['string', ['string', 'uint32']]
+                'guardd_verify_quant_128_vectors': ['pointer', ['string', 'pointer', 'size_t', 'uint32', 'uint32', 'string']],
+                'guardd_verify_model_128_vectors': ['pointer', ['string']],
+                'guardd_run_bitflip_corpus_test': ['pointer', ['size_t', 'size_t', 'string']],
+                'guardd_free_json_result': ['void', ['pointer']],
+                'guardd_perfect_hash_encode': ['pointer', ['string', 'string']],
+                'guardd_perfect_hash_decode': ['pointer', ['string', 'uint32']]
             });
         } catch (error) {
             throw new Error(`Failed to load library ${libPath}: ${error.message}`);
@@ -93,6 +93,13 @@ class ModelAssetGuard {
      */
     _setupFunctionSignatures() {
         // Additional setup if needed
+    }
+
+    _ptrToString(ptr) {
+        if (!ptr || ref.isNull(ptr)) {
+            throw new Error('Native call returned null pointer');
+        }
+        return ref.readCString(ptr, 0);
     }
 
     /**
@@ -140,6 +147,9 @@ class ModelAssetGuard {
      * @throws {Error} - If loading fails
      */
     checkedLoad(filePath, expectedDigest = null) {
+        if (expectedDigest && (!Buffer.isBuffer(expectedDigest) || expectedDigest.length !== 32)) {
+            throw new Error('Expected digest must be 32 bytes');
+        }
         const digestPtr = expectedDigest ? expectedDigest : null;
         const handlePtr = this.lib.guardd_checked_load(filePath, digestPtr);
 
@@ -148,18 +158,11 @@ class ModelAssetGuard {
         }
 
         try {
-            // Parse the handle structure
-            // Note: This is a simplified version. In practice, you'd need to properly
-            // define the ModelHandle structure using ref-struct-napi
-            const handle = ref.deref(handlePtr);
-            
-            // For now, we'll return a basic structure
-            // In a full implementation, you'd parse the actual C structure
             const result = {
                 path: filePath,
-                size: 0, // Would be extracted from handle
-                digest: '', // Would be extracted from handle
-                valid: true // Would be extracted from handle
+                size: fs.statSync(filePath).size,
+                digest: this.computeDigest(filePath).toString('hex'),
+                valid: true
             };
 
             return result;
@@ -199,7 +202,7 @@ class ModelAssetGuard {
         }
 
         try {
-            const resultJson = resultPtr;
+            const resultJson = this._ptrToString(resultPtr);
             return JSON.parse(resultJson);
         } finally {
             this.lib.guardd_free_json_result(resultPtr);
@@ -222,7 +225,7 @@ class ModelAssetGuard {
         }
 
         try {
-            const resultJson = resultPtr;
+            const resultJson = this._ptrToString(resultPtr);
             return JSON.parse(resultJson);
         } finally {
             this.lib.guardd_free_json_result(resultPtr);
@@ -254,7 +257,7 @@ class ModelAssetGuard {
         }
 
         try {
-            const resultJson = resultPtr;
+            const resultJson = this._ptrToString(resultPtr);
             return JSON.parse(resultJson);
         } finally {
             this.lib.guardd_free_json_result(resultPtr);
@@ -277,7 +280,7 @@ class ModelAssetGuard {
         }
 
         try {
-            const resultJson = resultPtr;
+            const resultJson = this._ptrToString(resultPtr);
             return JSON.parse(resultJson);
         } finally {
             this.lib.guardd_free_json_result(resultPtr);
@@ -300,7 +303,7 @@ class ModelAssetGuard {
         }
 
         try {
-            return resultPtr;
+            return this._ptrToString(resultPtr);
         } finally {
             this.lib.guardd_free_json_result(resultPtr);
         }

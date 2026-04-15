@@ -1,9 +1,6 @@
 use rand::{Rng, SeedableRng};
 use rand::rngs::StdRng;
 use serde::{Serialize, Deserialize};
-use std::ffi::{CStr, CString};
-use std::os::raw::c_char;
-use std::ptr;
 
 /// Configuration for quantization verification
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -166,7 +163,7 @@ pub fn verify_layer_128_vectors(
         config: config.clone(),
         epsilon_bound,
         max_error_128_vectors: max_error,
-        mean_error_128_vectors: mean_error as f64,
+        mean_error_128_vectors: mean_error,
         error_std_deviation: std_deviation,
         passed_128_vectors: max_error <= epsilon_bound,
         error_distribution,
@@ -178,8 +175,6 @@ pub fn verify_layer_128_vectors(
 pub fn verify_model_128_vectors(
     layers: Vec<(String, Vec<f32>, QuantizationConfig)>,
 ) -> ModelVerification128 {
-    let start_time = std::time::Instant::now();
-    
     let mut layer_results = Vec::with_capacity(layers.len());
     let mut total_computation_time = 0u64;
     

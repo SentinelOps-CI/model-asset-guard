@@ -12,71 +12,72 @@ on:
 jobs:
   formal-verify:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
       - name: Setup Lean 4
-        run: |
-          wget -q https://github.com/leanprover/lean4/releases/download/nightly-2024-01-15/lean-4.0.0-nightly-2024-01-15-linux.tar.gz
-          tar -xzf lean-4.0.0-nightly-2024-01-15-linux.tar.gz
-          echo "$PWD/lean-4.0.0-nightly-2024-01-15-linux/bin" >> $GITHUB_PATH
+        uses: leanprover/lean-action@v1
 
       - name: Cache Lean dependencies
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: .lake
           key: ${{ runner.os }}-lean-${{ hashFiles('lakefile.lean', 'lean-toolchain') }}
           restore-keys: |
             ${{ runner.os }}-lean-
 
+      # Lean warnings fail the build: `lakefile.lean` sets `-DwarningAsError=true` on the package.
       - name: Build Lean project
         run: lake build
 
       - name: Run formal verification
         run: |
+          set -euo pipefail
           echo "Running formal verification of Model Asset Guard specifications..."
 
           # Verify core specifications
           lake build ModelAssetGuard
 
           # Verify quantization bounds
-          lake build QuantBound
+          lake build quantbound
 
           # Verify tokenizer specifications
-          lake build TokenizerTest
+          lake build tokenizertest
 
           # Verify weight integrity specifications
-          lake build VerifyWeights
+          lake build verifyweights
 
           # Verify bit-flip corpus specifications
-          lake build BitFlipCorpus
+          lake build bitflipcorpus
 
           # Verify 128-vector quantization verification
-          lake build QuantVerify128
+          lake build quantverify128
 
           # Verify perfect hash tokenizer
-          lake build PerfectHash
+          lake build perfecthash
 
           echo "✅ All formal specifications verified successfully"
 
       - name: Run Lean tests
-        run: lake test
+        run: lake exe tests
 
       - name: Check for sorry statements
         run: |
-          echo "Checking for incomplete proofs (sorry statements)..."
-          SORRY_COUNT=$(grep -r "sorry" src/lean/ | wc -l)
+          echo "Checking for incomplete proofs (sorry statements)"
+          SORRY_COUNT=$(python - <<'PY'
+import pathlib, re
+count = 0
+for p in pathlib.Path("src/lean").rglob("*.lean"):
+    count += len(re.findall(r"\bsorry\b", p.read_text(encoding="utf-8")))
+print(count)
+PY
+)
           echo "Found $SORRY_COUNT sorry statements"
-
-          if [ $SORRY_COUNT -gt 0 ]; then
-            echo "⚠️  Warning: Found $SORRY_COUNT incomplete proofs"
-            echo "These should be completed for full formal verification:"
-            grep -r "sorry" src/lean/ || true
-          else
-            echo "✅ No incomplete proofs found"
-          fi
+          test "$SORRY_COUNT" -eq 0
 
       - name: Verify type safety
         run: |
@@ -119,7 +120,7 @@ jobs:
           echo "Report generated: verification_report.md"
 
       - name: Upload verification report
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: formal-verification-report
           path: verification_report.md

@@ -12,21 +12,21 @@ mkdir -p "$BUNDLE_DIR"
 # Copy specification files
 echo "Copying specification files..."
 mkdir -p "$BUNDLE_DIR/Spec"
-cp ModelAssetGuard/Weights.lean "$BUNDLE_DIR/Spec/"
-cp ModelAssetGuard/Quant/Core.lean "$BUNDLE_DIR/Spec/"
-cp ModelAssetGuard/Quant/LayerBound.lean "$BUNDLE_DIR/Spec/"
-cp ModelAssetGuard/Token/Tokenizer.lean "$BUNDLE_DIR/Spec/"
+cp src/lean/ModelAssetGuard/Weights.lean "$BUNDLE_DIR/Spec/"
+cp src/lean/ModelAssetGuard/Quant/Core.lean "$BUNDLE_DIR/Spec/"
+cp src/lean/ModelAssetGuard/Quant/LayerBound.lean "$BUNDLE_DIR/Spec/"
+cp src/lean/ModelAssetGuard/Token/Tokenizer.lean "$BUNDLE_DIR/Spec/"
 
 # Copy HuggingFace integration files (G-3 requirement)
 echo "Copying HuggingFace integration files..."
 mkdir -p "$BUNDLE_DIR/bindings"
-cp pytorch_guard.py "$BUNDLE_DIR/bindings/"
-cp node_guard.js "$BUNDLE_DIR/bindings/"
-cp test_huggingface_integration.py "$BUNDLE_DIR/bindings/"
+cp bindings/python/pytorch_guard.py "$BUNDLE_DIR/bindings/"
+cp bindings/nodejs/node_guard.js "$BUNDLE_DIR/bindings/"
+cp tests/e2e/test_huggingface_integration.py "$BUNDLE_DIR/bindings/"
 
 # Copy perfect hash tokenizer files (T-3 requirement)
 echo "Copying perfect hash tokenizer files..."
-cp test_perfect_hash_integration.py "$BUNDLE_DIR/bindings/"
+cp tests/e2e/test_perfect_hash_integration.py "$BUNDLE_DIR/bindings/"
 mkdir -p "$BUNDLE_DIR/docs"
 cp docs/perfect-hash-tokenizer.md "$BUNDLE_DIR/docs/"
 
@@ -38,12 +38,12 @@ cp examples/huggingface_example.py "$BUNDLE_DIR/examples/"
 # Copy extracted Rust library
 echo "Copying Rust library..."
 mkdir -p "$BUNDLE_DIR/guardd"
-if [ -f "guardd/target/release/libguardd.so" ]; then
-    cp guardd/target/release/libguardd.so "$BUNDLE_DIR/guardd/"
+if [ -f "src/rust/guardd/target/release/libguardd.so" ]; then
+    cp src/rust/guardd/target/release/libguardd.so "$BUNDLE_DIR/guardd/"
 else
     echo "Warning: libguardd.so not found, building..."
-    cargo build --release --manifest-path guardd/Cargo.toml
-    cp guardd/target/release/libguardd.so "$BUNDLE_DIR/guardd/"
+    cargo build --release --manifest-path src/rust/guardd/Cargo.toml
+    cp src/rust/guardd/target/release/libguardd.so "$BUNDLE_DIR/guardd/"
 fi
 
 # Generate Lean kernel hash
@@ -79,8 +79,8 @@ To verify this bundle:
 2. Build and test the components:
    ```bash
    lake build
-   lake test
-   cargo test --manifest-path guardd/Cargo.toml
+   lake exe tests
+   cargo test --manifest-path src/rust/guardd/Cargo.toml
    ```
 
 3. Run the benchmark suite:

@@ -1,388 +1,218 @@
 # Model Asset Guard
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Lean 4](https://img.shields.io/badge/Lean-4.0.0--nightly--2024--01--15-blue.svg)](https://leanprover.github.io/)
-[![Rust](https://img.shields.io/badge/Rust-1.70+-orange.svg)](https://www.rust-lang.org/)
-[![Python](https://img.shields.io/badge/Python-3.8+-green.svg)](https://www.python.org/)
+[![Lean 4](https://img.shields.io/badge/Lean-4%20stable-blue.svg)](https://leanprover.github.io/)
+[![Rust](https://img.shields.io/badge/Rust-stable-orange.svg)](https://www.rust-lang.org/)
+[![Python](https://img.shields.io/badge/Python-3.11+-green.svg)](https://www.python.org/)
 [![CI/CD](https://github.com/fraware/model-asset-guard/workflows/Model%20Asset%20Guard%20CI/badge.svg)](https://github.com/fraware/model-asset-guard/actions)
 
-> **Machine-verified integrity for every fixed model artifact** — weights, vocabularies, quantization tables, and tokenizers.
+> **Machine-verified integrity for fixed model artifacts**  
+> Weights, quantization constraints, and tokenizer behavior validated from formal spec to runtime checks.
 
-Model Asset Guard provides formal verification and runtime validation for machine learning model artifacts, ensuring their integrity, correctness, and reliability throughout the model lifecycle.
+Model Asset Guard combines Lean 4 formal specifications with a Rust runtime sidecar and language bindings so teams can verify artifact integrity as part of normal model delivery.
 
-## Table of Contents
+## Why Model Asset Guard
 
-- [Overview](#overview)
-- [Features](#features)
-- [Architecture](#architecture)
-- [Quick Start](#quick-start)
-- [Installation](#installation)
-- [Usage](#usage)
-- [API Reference](#api-reference)
-- [Development](#development)
-- [Contributing](#contributing)
-- [License](#license)
+ML artifact failures are often silent: corrupted checkpoints, drifted quantization assumptions, and tokenizer mismatches can pass standard unit tests and still break production behavior.  
+This project closes that gap with a verification-first pipeline:
 
-## Overview
+- **Formal guarantees** for key invariants in Lean 4
+- **Runtime enforcement** in Rust for fast, practical checks
+- **Workflow integration** through CI gates and Python/Node entry points
 
-Model Asset Guard addresses critical challenges in machine learning model deployment by providing:
+## What You Get
 
-- **Formal Verification**: Lean 4 specifications for mathematical correctness
-- **Runtime Validation**: High-performance Rust sidecar for integrity checks
-- **Cross-Platform Support**: Python and Node.js bindings for seamless integration
-- **Production Ready**: Zero unsafe code, comprehensive testing, and CI/CD integration
+| Capability | What it verifies | Implementation |
+| --- | --- | --- |
+| Weight integrity | SHA-256 consistency and checkpoint validity | Lean + Rust |
+| Quantization bounds | Layer error bounds for quantized weights | Lean |
+| Tokenizer determinism | Stable encode/decode behavior | Lean + tests |
+| Runtime guardrails | Fast validation in production paths | Rust FFI |
+| Integration surface | Python and Node usage paths | Bindings |
 
-### Problem Statement
+## At a Glance
 
-Modern ML pipelines face significant challenges with model artifact integrity:
+| Area | Current policy |
+| --- | --- |
+| Lean compiler warnings | **Fail build** via `warningAsError` in `lakefile.lean` |
+| Formal completeness | CI fails on `sorry` in `src/lean` |
+| Rust quality gate | `cargo clippy ... -D warnings` |
+| Canonical local gate | `bash scripts/ci_preflight.sh` |
 
-- **Bit Corruption**: Silent failures from storage or transmission errors
-- **Quantization Errors**: Unbounded error accumulation in quantized models
-- **Tokenizer Inconsistencies**: Non-deterministic encoding/decoding behavior
-- **Version Drift**: Undetected changes in model artifacts
+## Repository Map
 
-### Solution
-
-Model Asset Guard provides a comprehensive solution through:
-
-1. **SHA-256 Integrity Validation** with formal proofs
-2. **Quantization Error Bounds** with mathematical guarantees
-3. **Tokenizer Determinism Verification** with fuzz testing
-4. **High-Performance Runtime Validation** via Rust sidecar
-5. **Seamless Integration** with existing ML frameworks
-
-## Features
-
-### Core Capabilities
-
-| Feature                    | Description                             | Technology     |
-| -------------------------- | --------------------------------------- | -------------- |
-| **Weight Integrity**       | SHA-256 validation with formal proofs   | Lean 4 + Rust  |
-| **Quantization Bounds**    | Mathematical error bounds for int8/FP16 | Lean 4         |
-| **Tokenizer Verification** | Determinism and surjectivity proofs     | Lean 4         |
-| **Runtime Validation**     | High-performance integrity checks       | Rust           |
-| **Framework Integration**  | HuggingFace, PyTorch, Node.js support   | Python/Node.js |
-
-### Performance Characteristics
-
-- **Startup Overhead**: < 10ms for integrity checks
-- **Memory Footprint**: < 1MB binary size
-- **Zero Heap Allocations**: Deterministic memory usage
-- **100% Bit-Flip Detection**: Comprehensive corruption detection
-
-## Architecture
-
-### System Components
-
-```
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   Lean 4 Specs  │    │  Rust Sidecar   │    │ Language Bindings│
-│                 │    │                 │    │                 │
-│ • Formal Proofs │◄──►│ • High Perf     │◄──►│ • Python        │
-│ • Math Bounds   │    │ • Zero Unsafe   │    │ • Node.js        │
-│ • Verification  │    │ • FFI Interface │    │ • HuggingFace   │
-└─────────────────┘    └─────────────────┘    └─────────────────┘
-```
-
-### Directory Structure
-
-```
+```text
 model-asset-guard/
-├── src/                              # Source code
-│   ├── lean/                         # Lean 4 specifications
-│   │   ├── ModelAssetGuard/          # Core library
-│   │   └── cli/                      # Command-line tools
-│   ├── rust/                         # Rust sidecar
-│   │   └── guardd/                   # High-performance library
-│   └── python/                       # Python source code
-├── bindings/                         # Language bindings
-│   ├── python/                       # Python bindings
-│   └── nodejs/                       # Node.js bindings
-├── tests/                            # Test suite
-│   ├── unit/                         # Unit tests
-│   ├── integration/                  # Integration tests
-│   ├── e2e/                          # End-to-end tests
-│   └── performance/                  # Performance tests
-├── scripts/                          # Build and utility scripts
+├── src/
+│   ├── lean/
+│   │   ├── ModelAssetGuard/          # Core specs
+│   │   └── cli/                      # Lean executables
+│   └── rust/
+│       └── guardd/                   # Runtime sidecar (FFI boundary)
+├── bindings/
+│   ├── python/
+│   └── nodejs/
+├── docs/
+├── tests/
+├── scripts/
+├── lakefile.lean
+└── lean-toolchain
 ```
 
 ## Quick Start
 
-### Prerequisites
+### 1) Prerequisites
 
-- **Lean 4**: `nightly-2024-01-15` or later
-- **Rust**: `1.70+` with Cargo
-- **Python**: `3.8+` (for bindings and testing)
-- **Node.js**: `16.0+` (for Node.js bindings)
+- Lean 4 (`leanprover/lean4:stable`, managed with [`elan`](https://github.com/leanprover/elan))
+- Rust stable + Cargo
+- Python 3.11+
+- Node.js 20+
 
-### Installation
+### 2) Build and verify
 
 ```bash
-# Clone the repository
-git clone https://github.com/SentinelOps-CI/model-asset-guard.git
+git clone https://github.com/fraware/model-asset-guard.git
 cd model-asset-guard
 
-# Build Lean specifications
+# Lean (warnings are errors)
 lake build
+lake exe tests
 
-# Build Rust sidecar
+# Rust runtime
 cargo build --release --manifest-path src/rust/guardd/Cargo.toml
+cargo test --manifest-path src/rust/guardd/Cargo.toml --locked
 
-# Install Python bindings (optional)
-pip install -e bindings/python/
-
-# Run verification tests
-lake test
-cargo test --manifest-path src/rust/guardd/Cargo.toml
+# Optional: run full local CI gate
+bash scripts/ci_preflight.sh
 ```
 
-### Basic Usage
+### 3) Python path setup (local development)
 
-#### Verify Model Weights
+The Python bindings are source-based in this repo; add them to `PYTHONPATH`:
 
 ```bash
-# Verify a checkpoint file
+export PYTHONPATH="$(pwd)/bindings/python${PYTHONPATH:+:$PYTHONPATH}"
+```
+
+## CLI Usage
+
+### Verify checkpoint integrity
+
+```bash
 lake exe verifyweights /path/to/checkpoint.bin
-
-# Verify with expected digest
-lake exe verifyweights /path/to/checkpoint.bin --digest abc123...
+lake exe verifyweights /path/to/checkpoint.bin --digest <expected_digest>
 ```
 
-#### Generate Quantization Bounds
+### Check quantization bounds
 
 ```bash
-# Generate bounds for ONNX model
 lake exe quantbound /path/to/model.onnx --output bounds.json
-
-# Verify quantization error
 lake exe quantbound /path/to/model.onnx --verify --tolerance 1e-6
 ```
 
-#### Test Tokenizer Determinism
+### Test tokenizer behavior
 
 ```bash
-# Test BPE tokenizer
 lake exe tokenizertest /path/to/tokenizer.json --type bpe
-
-# Fuzz test with 1M random strings
 lake exe tokenizertest /path/to/tokenizer.json --fuzz 1000000
+lake exe perfecthash --help
 ```
 
-## Usage
+## Language Integrations
 
-### Python Integration
+### Python
 
 ```python
-from bindings.python.pytorch_guard import ModelAssetGuard, checked_load_pretrained
+from bindings.python.pytorch_guard import ModelAssetGuard, HuggingFaceGuard
 
-# Initialize guard
 guard = ModelAssetGuard()
-
-# Verify file integrity
-verified = guard.verify_digest("model.bin", expected_digest)
-
-# Load model with verification
+ok = guard.verify_digest("model.bin", expected_digest)
 model_info = guard.checked_load("model.bin", expected_digest)
-
-# HuggingFace integration
-from bindings.python.pytorch_guard import HuggingFaceGuard
 
 hf_guard = HuggingFaceGuard(guard)
 model, tokenizer, info = hf_guard.checked_load_pretrained(
     "gpt2",
-    verify_quantization=True
+    verify_quantization=True,
 )
 ```
 
-### Node.js Integration
+### Node.js
 
 ```javascript
 const { ModelAssetGuard } = require("./bindings/nodejs/node_guard.js");
 
-// Initialize guard
 const guard = new ModelAssetGuard();
-
-// Verify model integrity
-const verified = guard.verifyDigest("model.bin", expectedDigest);
-
-// Load model with verification
+const ok = guard.verifyDigest("model.bin", expectedDigest);
 const modelInfo = guard.checkedLoad("model.bin", expectedDigest);
 ```
 
-### Rust Integration
+### Rust
 
 ```rust
 use guardd::{checked_load, verify_digest};
 
-// Verify file integrity
-let verified = verify_digest("model.bin", &expected_digest)?;
-
-// Load model with verification
-let model_info = checked_load("model.bin", Some(&expected_digest))?;
+let ok = verify_digest("model.bin", &expected_digest)?;
+let info = checked_load("model.bin", Some(&expected_digest))?;
 ```
 
-## API Reference
-
-### Core Functions
-
-#### `verify_digest(path: &str, expected_digest: &[u8]) -> Result<bool, GuarddError>`
-
-Verifies SHA-256 digest of a file.
-
-**Parameters:**
-
-- `path`: Path to the file to verify
-- `expected_digest`: Expected SHA-256 digest (32 bytes)
-
-**Returns:** `true` if digest matches, `false` otherwise
-
-#### `checked_load(path: &str, expected_digest: Option<&[u8]>) -> Result<ModelInfo, GuarddError>`
-
-Loads and validates a model file.
-
-**Parameters:**
-
-- `path`: Path to the model file
-- `expected_digest`: Optional expected digest for validation
-
-**Returns:** Model information including path, size, and digest
-
-#### `verify_quantization_128_vectors(layer_name: &str, weights: &[f32], fan_in: u32, fan_out: u32, quant_type: &str) -> Result<QuantizationResult, GuarddError>`
-
-Verifies quantization bounds for a layer.
-
-**Parameters:**
-
-- `layer_name`: Name of the layer
-- `weights`: Weight matrix as flat array
-- `fan_in`: Input dimension
-- `fan_out`: Output dimension
-- `quant_type`: Quantization type ("int8", "fp16")
-
-**Returns:** Quantization verification results
-
-### Error Handling
+## API Surface (Core)
 
 ```rust
-#[derive(Debug)]
-pub enum GuarddError {
-    FileNotFound(String),
-    InvalidDigest(String),
-    QuantizationError(String),
-    IoError(std::io::Error),
-}
+verify_digest(path: &str, expected_digest: &[u8]) -> Result<bool, GuarddError>
+checked_load(path: &str, expected_digest: Option<&[u8]>) -> Result<ModelInfo, GuarddError>
+verify_quantization_128_vectors(
+  layer_name: &str,
+  weights: &[f32],
+  fan_in: u32,
+  fan_out: u32,
+  quant_type: &str
+) -> Result<QuantizationResult, GuarddError>
 ```
 
-## Development
+`GuarddError` covers I/O and validation failures (`FileNotFound`, `InvalidDigest`, `QuantizationError`, `IoError`).
 
-### Building from Source
+## Quality and CI
 
-```bash
-# Clone with submodules
-git clone --recursive https://github.com/fraware/model-asset-guard.git
-cd model-asset-guard
+Main workflows in `.github/workflows/`:
 
-# Build all components
-make build
+- `ci.yml`: cross-platform quality checks, security checks, and performance bench step
+- `formal-verify.yml`: Lean build + formal targets + `sorry` enforcement
+- `bundle-push.yml`: release bundle and SBOM flow
 
-# Run all tests
-make test
+Lean warnings are enforced as errors by project configuration in `lakefile.lean`, so formal and standard builds share the same warning-clean requirement.
 
-# Run benchmarks
-make benchmark
-```
+## Documentation
 
-### Development Environment
-
-````bash
-# Setup development environment
-make setup-dev
-
-# Run linting
-make lint
-
-# Run security audit
-make security-audit
-
-### Testing
-
-```bash
-# Run unit tests
-lake test
-cargo test --manifest-path src/rust/guardd/Cargo.toml
-
-# Run integration tests
-python tests/e2e/test_huggingface_integration.py
-
-# Run performance tests
-lake exe benchmarks
-````
-
-### Continuous Integration
-
-The project includes comprehensive CI/CD pipelines:
-
-- **Multi-platform Testing**: Ubuntu, macOS, Windows
-- **Security Scanning**: Cargo audit, unsafe code detection
-- **Performance Benchmarks**: Automated performance regression testing
-- **Documentation Generation**: Automated API documentation
+- [Perfect hash tokenizer](docs/perfect-hash-tokenizer.md)
 
 ## Contributing
 
-We welcome contributions from the community! Please see our [Contributing Guidelines](CONTRIBUTING.md) for details.
+Until a dedicated contribution guide is added, use `scripts/ci_preflight.sh` and existing CI workflows as the acceptance baseline.
 
-### Development Workflow
+Typical flow:
 
-1. **Fork** the repository
-2. **Create** a feature branch (`git checkout -b feature/amazing-feature`)
-3. **Commit** your changes (`git commit -m 'Add amazing feature'`)
-4. **Push** to the branch (`git push origin feature/amazing-feature`)
-5. **Open** a Pull Request
-
-### Code Standards
-
-- **Lean 4**: Follow Lean 4 style guidelines
-- **Rust**: Follow Rust coding standards, zero unsafe code
-- **Python**: Follow PEP 8, type hints required
-- **Tests**: Maintain >90% test coverage
-
-### Testing Requirements
-
-- All new features must include unit tests
-- Integration tests for cross-language functionality
-- Performance benchmarks for critical paths
-- Security tests for all external interfaces
+1. Fork and branch from `main`
+2. Implement changes with tests
+3. Run local gates
+4. Open a PR with a clear test plan
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## Acknowledgments
-
-- **Lean Community**: For the formal verification framework
-- **Rust Community**: For the high-performance systems programming language
-- **HuggingFace**: For the transformers library integration
-- **Academic Contributors**: For mathematical foundations and proofs
+MIT. See [LICENSE](LICENSE).
 
 ## Citation
-
-If you use Model Asset Guard in your research, please cite:
 
 ```bibtex
 @software{model_asset_guard,
   title={Model Asset Guard: Machine-verified integrity for ML artifacts},
   author={Model Asset Guard Contributors},
-  year={2025},
+  year={2026},
   url={https://github.com/fraware/model-asset-guard}
 }
 ```
 
 ## Support
 
-- **Issues**: [GitHub Issues](https://github.com/fraware/model-asset-guard/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/fraware/model-asset-guard/discussions)
-- **Security**: [Security Policy](SECURITY.md)
-
----
-
-**Model Asset Guard** - Ensuring the integrity of machine learning artifacts through formal verification and runtime validation.
+- Issues: [GitHub Issues](https://github.com/fraware/model-asset-guard/issues)
+- Discussions: [GitHub Discussions](https://github.com/fraware/model-asset-guard/discussions)
+- Security reports: [GitHub Security Advisories](https://github.com/fraware/model-asset-guard/security/advisories)

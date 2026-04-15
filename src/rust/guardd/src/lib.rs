@@ -5,16 +5,15 @@ use std::os::raw::c_char;
 use std::ptr;
 use memmap2::Mmap;
 use std::fs::File;
-use std::path::Path;
 
 // Include the bit-flip corpus module
 mod bitflip_corpus;
-use bitflip_corpus::{BitFlipCorpusTester, BitFlipTestResult, CorpusTestSummary};
+use bitflip_corpus::BitFlipCorpusTester;
 
 // Include the quantization verification module
 mod quant_verification;
 use quant_verification::{
-    QuantizationConfig, LayerVerification128, ModelVerification128,
+    QuantizationConfig,
     verify_layer_128_vectors, verify_model_128_vectors
 };
 
@@ -56,8 +55,12 @@ pub struct LayerVerification {
 }
 
 /// Check SHA-256 digest of a file using memory mapping for performance
+///
+/// # Safety
+/// `path` must be a valid, null-terminated UTF-8 C string and `expected_digest`
+/// must point to at least 32 readable bytes.
 #[no_mangle]
-pub extern "C" fn guardd_verify_digest(path: *const c_char, expected_digest: *const u8) -> GuarddError {
+pub unsafe extern "C" fn guardd_verify_digest(path: *const c_char, expected_digest: *const u8) -> GuarddError {
     if path.is_null() || expected_digest.is_null() {
         return GuarddError::InvalidPath;
     }
@@ -91,8 +94,12 @@ pub extern "C" fn guardd_verify_digest(path: *const c_char, expected_digest: *co
 }
 
 /// Load a model with integrity checks
+///
+/// # Safety
+/// `path` must be a valid, null-terminated UTF-8 C string. If non-null,
+/// `expected_digest` must point to at least 32 readable bytes.
 #[no_mangle]
-pub extern "C" fn guardd_checked_load(path: *const c_char, expected_digest: *const u8) -> *mut ModelHandle {
+pub unsafe extern "C" fn guardd_checked_load(path: *const c_char, expected_digest: *const u8) -> *mut ModelHandle {
     if path.is_null() {
         return ptr::null_mut();
     }
@@ -144,8 +151,12 @@ pub extern "C" fn guardd_checked_load(path: *const c_char, expected_digest: *con
 }
 
 /// Free a model handle
+///
+/// # Safety
+/// `handle` must be a pointer previously returned by `guardd_checked_load`
+/// and must not be freed more than once.
 #[no_mangle]
-pub extern "C" fn guardd_free_handle(handle: *mut ModelHandle) {
+pub unsafe extern "C" fn guardd_free_handle(handle: *mut ModelHandle) {
     if !handle.is_null() {
         let handle = unsafe { Box::from_raw(handle) };
         unsafe {
@@ -156,7 +167,11 @@ pub extern "C" fn guardd_free_handle(handle: *mut ModelHandle) {
 
 /// Verify quantization bounds for a layer (legacy function)
 #[no_mangle]
-pub extern "C" fn guardd_verify_quant(
+///
+/// # Safety
+/// `weights` must point to `weights_len` readable `f32` values and `quant_type`
+/// must be a valid, null-terminated UTF-8 C string.
+pub unsafe extern "C" fn guardd_verify_quant(
     weights: *const f32,
     weights_len: usize,
     fan_in: u32,
@@ -172,7 +187,7 @@ pub extern "C" fn guardd_verify_quant(
         Err(_) => return ptr::null_mut(),
     };
 
-    let weights_slice = unsafe { std::slice::from_raw_parts(weights, weights_len) };
+    let _weights_slice = unsafe { std::slice::from_raw_parts(weights, weights_len) };
 
     // Compute epsilon bound based on quantization type
     let epsilon_bound = match quant_type_str {
@@ -196,16 +211,24 @@ pub extern "C" fn guardd_verify_quant(
 }
 
 /// Free a layer verification result
+///
+/// # Safety
+/// `verification` must be a pointer previously returned by `guardd_verify_quant`
+/// and must not be freed more than once.
 #[no_mangle]
-pub extern "C" fn guardd_free_verification(verification: *mut LayerVerification) {
+pub unsafe extern "C" fn guardd_free_verification(verification: *mut LayerVerification) {
     if !verification.is_null() {
         let _ = unsafe { Box::from_raw(verification) };
     }
 }
 
 /// Verify a single layer with 128 random activation vectors (Q-4 requirement)
+///
+/// # Safety
+/// `layer_name` and `quant_type` must be valid, null-terminated UTF-8 C strings.
+/// `weights` must point to `weights_len` readable `f32` values.
 #[no_mangle]
-pub extern "C" fn guardd_verify_quant_128_vectors(
+pub unsafe extern "C" fn guardd_verify_quant_128_vectors(
     layer_name: *const c_char,
     weights: *const f32,
     weights_len: usize,
@@ -249,8 +272,12 @@ pub extern "C" fn guardd_verify_quant_128_vectors(
 }
 
 /// Verify multiple layers with 128 vectors each (Q-4 requirement)
+///
+/// # Safety
+/// `layers_json` must be a valid, null-terminated UTF-8 C string containing
+/// JSON for `Vec<(String, Vec<f32>, QuantizationConfig)>`.
 #[no_mangle]
-pub extern "C" fn guardd_verify_model_128_vectors(
+pub unsafe extern "C" fn guardd_verify_model_128_vectors(
     layers_json: *const c_char,
 ) -> *mut c_char {
     if layers_json.is_null() {
@@ -287,35 +314,29 @@ pub extern "C" fn guardd_verify_model_128_vectors(
 /// Get error message for error code
 #[no_mangle]
 pub extern "C" fn guardd_error_message(error: GuarddError) -> *const c_char {
-    let message = match error {
-        GuarddError::Success => "Success",
-        GuarddError::FileNotFound => "File not found",
-        GuarddError::InvalidDigest => "Invalid digest",
-        GuarddError::QuantizationError => "Quantization error",
-        GuarddError::MemoryError => "Memory error",
-        GuarddError::InvalidPath => "Invalid path",
-    };
+    const SUCCESS: &[u8] = b"Success\0";
+    const FILE_NOT_FOUND: &[u8] = b"File not found\0";
+    const INVALID_DIGEST: &[u8] = b"Invalid digest\0";
+    const QUANTIZATION_ERROR: &[u8] = b"Quantization error\0";
+    const MEMORY_ERROR: &[u8] = b"Memory error\0";
+    const INVALID_PATH: &[u8] = b"Invalid path\0";
 
-    static mut ERROR_MESSAGES: [*const c_char; 6] = [ptr::null(); 6];
-    static mut INITIALIZED: bool = false;
-
-    unsafe {
-        if !INITIALIZED {
-            ERROR_MESSAGES[0] = b"Success\0".as_ptr() as *const c_char;
-            ERROR_MESSAGES[1] = b"File not found\0".as_ptr() as *const c_char;
-            ERROR_MESSAGES[2] = b"Invalid digest\0".as_ptr() as *const c_char;
-            ERROR_MESSAGES[3] = b"Quantization error\0".as_ptr() as *const c_char;
-            ERROR_MESSAGES[4] = b"Memory error\0".as_ptr() as *const c_char;
-            ERROR_MESSAGES[5] = b"Invalid path\0".as_ptr() as *const c_char;
-            INITIALIZED = true;
-        }
-        ERROR_MESSAGES[error as usize]
+    match error {
+        GuarddError::Success => SUCCESS.as_ptr() as *const c_char,
+        GuarddError::FileNotFound => FILE_NOT_FOUND.as_ptr() as *const c_char,
+        GuarddError::InvalidDigest => INVALID_DIGEST.as_ptr() as *const c_char,
+        GuarddError::QuantizationError => QUANTIZATION_ERROR.as_ptr() as *const c_char,
+        GuarddError::MemoryError => MEMORY_ERROR.as_ptr() as *const c_char,
+        GuarddError::InvalidPath => INVALID_PATH.as_ptr() as *const c_char,
     }
 }
 
 /// Run bit-flip corpus test (W-4 requirement)
+///
+/// # Safety
+/// If non-null, `temp_dir` must be a valid, null-terminated UTF-8 C string.
 #[no_mangle]
-pub extern "C" fn guardd_run_bitflip_corpus_test(
+pub unsafe extern "C" fn guardd_run_bitflip_corpus_test(
     file_size_gb: usize,
     num_corruptions: usize,
     temp_dir: *const c_char,
@@ -348,8 +369,11 @@ pub extern "C" fn guardd_run_bitflip_corpus_test(
 }
 
 /// Run comprehensive bit-flip corpus test suite
+///
+/// # Safety
+/// If non-null, `temp_dir` must be a valid, null-terminated UTF-8 C string.
 #[no_mangle]
-pub extern "C" fn guardd_run_comprehensive_bitflip_test(
+pub unsafe extern "C" fn guardd_run_comprehensive_bitflip_test(
     temp_dir: *const c_char,
 ) -> *mut c_char {
     let temp_dir_str = if temp_dir.is_null() {
@@ -380,8 +404,12 @@ pub extern "C" fn guardd_run_comprehensive_bitflip_test(
 }
 
 /// Free JSON result string
+///
+/// # Safety
+/// `result` must be a pointer previously returned by one of this library's
+/// JSON-returning functions and must not be freed more than once.
 #[no_mangle]
-pub extern "C" fn guardd_free_json_result(result: *mut c_char) {
+pub unsafe extern "C" fn guardd_free_json_result(result: *mut c_char) {
     if !result.is_null() {
         unsafe {
             let _ = CString::from_raw(result);
@@ -389,8 +417,12 @@ pub extern "C" fn guardd_free_json_result(result: *mut c_char) {
     }
 }
 
+/// Encode text into token IDs using perfect hash vocab JSON.
+///
+/// # Safety
+/// `vocab_json` and `text` must be valid, null-terminated UTF-8 C strings.
 #[no_mangle]
-pub extern "C" fn guardd_perfect_hash_encode(vocab_json: *const c_char, text: *const c_char) -> *mut c_char {
+pub unsafe extern "C" fn guardd_perfect_hash_encode(vocab_json: *const c_char, text: *const c_char) -> *mut c_char {
     if vocab_json.is_null() || text.is_null() {
         return std::ptr::null_mut();
     }
@@ -416,8 +448,12 @@ pub extern "C" fn guardd_perfect_hash_encode(vocab_json: *const c_char, text: *c
     }
 }
 
+/// Decode one token ID to string using perfect hash vocab JSON.
+///
+/// # Safety
+/// `vocab_json` must be a valid, null-terminated UTF-8 C string.
 #[no_mangle]
-pub extern "C" fn guardd_perfect_hash_decode(vocab_json: *const c_char, token: u32) -> *mut c_char {
+pub unsafe extern "C" fn guardd_perfect_hash_decode(vocab_json: *const c_char, token: u32) -> *mut c_char {
     if vocab_json.is_null() {
         return std::ptr::null_mut();
     }
@@ -441,6 +477,8 @@ mod tests {
     use super::*;
     use std::fs;
     use tempfile::NamedTempFile;
+    use crate::bitflip_corpus::BitFlipTestResult;
+    use crate::quant_verification::LayerVerification128;
 
     #[test]
     fn test_verify_digest() {
@@ -502,7 +540,7 @@ mod tests {
     fn test_verify_quant_128_vectors() {
         let layer_name = CString::new("test_layer").unwrap();
         let quant_type = CString::new("int8").unwrap();
-        let weights = vec![0.1f32; 50]; // 5x10 matrix
+        let weights = [0.1f32; 50]; // 5x10 matrix
         
         let result = unsafe {
             guardd_verify_quant_128_vectors(

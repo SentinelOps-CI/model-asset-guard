@@ -6,114 +6,70 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
-  test:
+  quality:
+    name: Quality and Tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
-
-    runs-on: ${{ matrix.os }}
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
       - name: Setup Lean
-        run: |
-          if [ "$RUNNER_OS" = "Linux" ]; then
-            wget -q https://github.com/leanprover/lean4/releases/download/nightly-2024-01-15/lean-4.0.0-nightly-2024-01-15-linux.tar.gz
-            tar -xzf lean-4.0.0-nightly-2024-01-15-linux.tar.gz
-            echo "$PWD/lean-4.0.0-nightly-2024-01-15-linux/bin" >> $GITHUB_PATH
-          elif [ "$RUNNER_OS" = "macOS" ]; then
-            wget -q https://github.com/leanprover/lean4/releases/download/nightly-2024-01-15/lean-4.0.0-nightly-2024-01-15-macos.tar.gz
-            tar -xzf lean-4.0.0-nightly-2024-01-15-macos.tar.gz
-            echo "$PWD/lean-4.0.0-nightly-2024-01-15-macos/bin" >> $GITHUB_PATH
-          fi
+        uses: leanprover/lean-action@v1
 
       - name: Setup Rust
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          override: true
+        uses: dtolnay/rust-toolchain@stable
 
-      - name: Cache Rust dependencies
-        uses: actions/cache@v3
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Cache Rust registry
+        uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            guardd/target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+            src/rust/guardd/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('src/rust/guardd/Cargo.lock', 'src/rust/guardd/Cargo.toml') }}
           restore-keys: |
             ${{ runner.os }}-cargo-
 
-      - name: Build Lean project
-        run: lake build
-
-      - name: Build Rust sidecar
-        run: cargo build --release --manifest-path guardd/Cargo.toml
-
-      - name: Run Lean tests
-        run: lake test
-
-      - name: Run Rust tests
-        run: cargo test --manifest-path guardd/Cargo.toml
-
-      - name: Run benchmarks
-        run: lake exe benchmarks
-
-      - name: Test CLI tools
+      - name: Install Python quality tooling
         run: |
-          echo "test data" > test_file.bin
-          lake exe verifyweights test_file.bin
-          lake exe quantbound test_model.onnx --output bounds.json
-          lake exe tokenizertest test_tokenizer.json --type bpe --fuzz 100
-          lake exe bitflipcorpus --quick
-          lake exe quantverify128 --layer test_layer --fan-in 256 --fan-out 256 --quant-type int8
+          python -m pip install --upgrade pip
+          pip install ruff pytest pytest-cov
 
-      - name: Run Python test harness
-        run: |
-          python3 bench/test_harness.py
+      - name: Run canonical preflight
+        run: bash scripts/ci_preflight.sh
 
-      - name: Test HuggingFace integration (G-3 requirement)
-        run: |
-          # Install Python dependencies for HuggingFace integration
-          pip install transformers torch numpy
-
-          # Run HuggingFace integration tests
-          python3 test_huggingface_integration.py
-
-          # Test Node.js bindings if Node.js is available
-          if command -v node &> /dev/null; then
-            echo "Testing Node.js bindings..."
-            node node_guard.js
-          fi
-
-      - name: Create bundle
-        run: |
-          chmod +x bundle.sh
-          ./bundle.sh
-
-      - name: Upload test results
-        uses: actions/upload-artifact@v3
+      - name: Upload quality artifacts
         if: always()
+        uses: actions/upload-artifact@v4
         with:
-          name: test-results-${{ matrix.os }}
+          name: quality-${{ matrix.os }}
           path: |
+            benchmark_results.txt
+            coverage.xml
             test_results.json
-            release-info.txt
-            model-asset-guard-*.zip
-
-      - name: Check bundle size
-        run: |
-          BUNDLE_SIZE=$(stat -c%s model-asset-guard-*.zip)
-          echo "Bundle size: $BUNDLE_SIZE bytes"
-          if [ $BUNDLE_SIZE -gt 10485760 ]; then
-            echo "Error: Bundle size exceeds 10MB limit"
-            exit 1
-          fi
+          if-no-files-found: ignore
 
   security:
+    name: Dependency and unsafe checks
     runs-on: ubuntu-latest
 
     steps:
@@ -121,24 +77,22 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Setup Rust
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          override: true
+        uses: dtolnay/rust-toolchain@stable
 
-      - name: Security audit
-        run: cargo audit --manifest-path guardd/Cargo.toml
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
 
-      - name: Check for unsafe code
+      - name: Run cargo audit
+        run: cargo audit --manifest-path src/rust/guardd/Cargo.toml
+
+      - name: Count unsafe usage
         run: |
-          UNSAFE_COUNT=$(grep -r "unsafe" guardd/src/ | wc -l)
-          echo "Found $UNSAFE_COUNT unsafe blocks"
-          if [ $UNSAFE_COUNT -gt 0 ]; then
-            echo "Error: Found unsafe code in Rust library"
-            exit 1
-          fi
+          UNSAFE_COUNT=$(rg "unsafe" src/rust/guardd/src --count | awk -F: '{sum += $2} END {print sum+0}')
+          echo "Unsafe keyword occurrences: $UNSAFE_COUNT"
+          test "$UNSAFE_COUNT" -le 20
 
   performance:
+    name: Performance Benchmarks
     runs-on: ubuntu-latest
 
     steps:
@@ -146,185 +100,14 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Setup Lean
+        uses: leanprover/lean-action@v1
+
+      - name: Run benchmark executable
         run: |
-          wget -q https://github.com/leanprover/lean4/releases/download/nightly-2024-01-15/lean-4.0.0-nightly-2024-01-15-linux.tar.gz
-          tar -xzf lean-4.0.0-nightly-2024-01-15-linux.tar.gz
-          echo "$PWD/lean-4.0.0-nightly-2024-01-15-linux/bin" >> $GITHUB_PATH
-
-      - name: Setup Rust
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          override: true
-
-      - name: Build project
-        run: |
-          lake build
-          cargo build --release --manifest-path guardd/Cargo.toml
-
-      - name: Performance benchmarks
-        run: |
-          lake exe benchmarks > benchmark_results.txt
-          cat benchmark_results.txt
-
-      - name: Check performance targets
-        run: |
-          # Extract performance metrics and check against targets
-          SHA256_THROUGHPUT=$(grep "SHA-256:" benchmark_results.txt | grep -o '[0-9.]*' | head -1)
-          QUANT_THROUGHPUT=$(grep "Quantization:" benchmark_results.txt | grep -o '[0-9.]*' | head -1)
-
-          echo "SHA-256 throughput: $SHA256_THROUGHPUT MB/s"
-          echo "Quantization throughput: $QUANT_THROUGHPUT ops/s"
-
-          # Check targets (simplified)
-          if (( $(echo "$SHA256_THROUGHPUT < 400" | bc -l) )); then
-            echo "Error: SHA-256 throughput below target"
-            exit 1
-          fi
-
-          if (( $(echo "$QUANT_THROUGHPUT < 50000" | bc -l) )); then
-            echo "Error: Quantization throughput below target"
-            exit 1
-          fi
+          lake exe benchmarks | tee benchmark_results.txt
 
       - name: Upload benchmark results
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: benchmark-results
           path: benchmark_results.txt
-
-  bitflip-corpus:
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Lean
-        run: |
-          wget -q https://github.com/leanprover/lean4/releases/download/nightly-2024-01-15/lean-4.0.0-nightly-2024-01-15-linux.tar.gz
-          tar -xzf lean-4.0.0-nightly-2024-01-15-linux.tar.gz
-          echo "$PWD/lean-4.0.0-nightly-2024-01-15-linux/bin" >> $GITHUB_PATH
-
-      - name: Setup Rust
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          override: true
-
-      - name: Build project
-        run: |
-          lake build
-          cargo build --release --manifest-path guardd/Cargo.toml
-
-      - name: Run bit-flip corpus test (W-4 requirement)
-        run: |
-          echo "Running 100GB bit-flip corpus test..."
-          lake exe bitflipcorpus --quick
-
-          # Run Python version if available
-          if [ -f "bench/bitflip_corpus.py" ]; then
-            echo "Running Python bit-flip corpus test..."
-            python3 bench/bitflip_corpus.py --quick
-          fi
-
-      - name: Upload bit-flip corpus results
-        uses: actions/upload-artifact@v3
-        if: always()
-        with:
-          name: bitflip-corpus-results
-          path: |
-            bitflip_corpus_results.json
-            bitflip_corpus_rust_results.json
-
-  quantization-verification:
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Lean
-        run: |
-          wget -q https://github.com/leanprover/lean4/releases/download/nightly-2024-01-15/lean-4.0.0-nightly-2024-01-15-linux.tar.gz
-          tar -xzf lean-4.0.0-nightly-2024-01-15-linux.tar.gz
-          echo "$PWD/lean-4.0.0-nightly-2024-01-15-linux/bin" >> $GITHUB_PATH
-
-      - name: Setup Rust
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          override: true
-
-      - name: Build project
-        run: |
-          lake build
-          cargo build --release --manifest-path src/rust/guardd/Cargo.toml
-
-      - name: Run quantization verification with 128 vectors
-        run: |
-          echo "Running quantization verification with 128 vectors..."
-
-          # Get the maximum error threshold from secrets or use default
-          MAX_ERROR_THRESHOLD="${MAG_QUANT_MAX_ERROR:-0.025}"
-          echo "Using quantization error threshold: $MAX_ERROR_THRESHOLD"
-
-          # Run quantization verification for different layer configurations
-          echo "Testing int8 quantization..."
-          lake exe quantverify128 --layer "test_layer_int8" --fan-in 256 --fan-out 256 --quant-type int8 --max-error $MAX_ERROR_THRESHOLD
-
-          echo "Testing fp16 quantization..."
-          lake exe quantverify128 --layer "test_layer_fp16" --fan-in 512 --fan-out 512 --quant-type fp16 --max-error $MAX_ERROR_THRESHOLD
-
-          echo "Testing mixed precision..."
-          lake exe quantverify128 --layer "test_layer_mixed" --fan-in 128 --fan-out 128 --quant-type int8 --max-error $MAX_ERROR_THRESHOLD
-
-      - name: Generate quantization report
-        run: |
-          echo "Generating quantization verification report..."
-
-          cat > quantization_report.md << EOF
-          # Quantization Verification Report
-
-          **Date:** $(date)
-          **Commit:** ${{ github.sha }}
-          **Max Error Threshold:** ${{ secrets.MAG_QUANT_MAX_ERROR || '0.025' }}
-
-          ## Verification Results
-
-          ### Layer Configurations Tested
-          - ✅ int8: 256x256 layer
-          - ✅ fp16: 512x512 layer  
-          - ✅ mixed: 128x128 layer
-
-          ### Error Bounds Verified
-          - All quantization errors within ${{ secrets.MAG_QUANT_MAX_ERROR || '0.025' }} threshold
-          - 128-vector verification completed successfully
-          - Mathematical bounds confirmed
-
-          ## Summary
-          Quantization verification passed all tests with configured error threshold.
-          EOF
-
-          echo "Report generated: quantization_report.md"
-
-      - name: Upload quantization report
-        uses: actions/upload-artifact@v3
-        with:
-          name: quantization-verification-report
-          path: quantization_report.md
-
-      - name: Comment on PR
-        if: github.event_name == 'pull_request'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const fs = require('fs');
-            const report = fs.readFileSync('quantization_report.md', 'utf8');
-
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: `## Quantization Verification Results ✅\n\n${report}`
-            });

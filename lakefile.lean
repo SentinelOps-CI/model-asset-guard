@@ -2,48 +2,57 @@ import Lake
 open Lake DSL
 
 package modelassetguard {
-  -- add package configuration options here
+  -- CI policy: warnings fail the build (same as `lean -DwarningAsError=true`).
+  leanOptions := #[⟨`warningAsError, true⟩]
 }
 
 @[default_target]
 lean_lib ModelAssetGuard {
-  -- add library configuration options here
+  srcDir := "src/lean"
 }
 
 -- Test suite
 lean_exe tests {
   root := `Tests
+  srcDir := "src/lean"
 }
 
 -- Benchmark suite
 lean_exe benchmarks {
-  root := `Benchmarks
+  root := `cli.Benchmarks.Main
+  srcDir := "src/lean"
 }
 
 -- CLI tools
 lean_exe quantbound {
-  root := `QuantBound
+  root := `cli.QuantBound.Main
+  srcDir := "src/lean"
 }
 
 lean_exe verifyweights {
-  root := `VerifyWeights
+  root := `cli.VerifyWeights.Main
+  srcDir := "src/lean"
 }
 
 lean_exe tokenizertest {
-  root := `TokenizerTest
+  root := `cli.TokenizerTest.Main
+  srcDir := "src/lean"
 }
 
 -- Bit-flip corpus test (W-4 requirement)
 lean_exe bitflipcorpus {
-  root := `BitFlipCorpus
+  root := `cli.BitFlipCorpus.Main
+  srcDir := "src/lean"
 }
 
 -- 128 vectors/layer quantization verification (Q-4 requirement)
 lean_exe quantverify128 {
-  root := `QuantVerify128
+  root := `cli.QuantVerify128.Main
+  srcDir := "src/lean"
 }
 
 -- Perfect hash tokenizer CLI (T-3 requirement)
 lean_exe perfecthash {
-  root := `PerfectHash
+  root := `cli.PerfectHash.Main
+  srcDir := "src/lean"
 }

@@ -16,7 +16,7 @@ import tempfile
 import subprocess
 import sys
 from pathlib import Path
-from typing import Dict, List, Any, Optional
+from typing import Dict, Any
 
 
 def create_test_vocab() -> Dict[str, Any]:
@@ -59,7 +59,7 @@ def test_rust_cli() -> Dict[str, Any]:
                 "--bin",
                 "gen_perfect_hash",
                 "--manifest-path",
-                "guardd/Cargo.toml",
+                "src/rust/guardd/Cargo.toml",
                 vocab_file,
                 "--output",
                 "test_perfect_hash.json",
@@ -101,7 +101,8 @@ def test_python_bindings() -> Dict[str, Any]:
 
     try:
         # Import the Python bindings
-        sys.path.insert(0, ".")
+        repo_root = Path(__file__).resolve().parents[2]
+        sys.path.insert(0, str(repo_root / "bindings" / "python"))
         from pytorch_guard import ModelAssetGuard
 
         # Create guard instance
@@ -180,7 +181,8 @@ def test_nodejs_bindings() -> Dict[str, Any]:
     print("Testing Node.js bindings...")
 
     # Create test script
-    node_guard_path = os.path.abspath("node_guard.js").replace("\\", "/")
+    repo_root = Path(__file__).resolve().parents[2]
+    node_guard_path = str((repo_root / "bindings" / "nodejs" / "node_guard.js").resolve()).replace("\\", "/")
     test_script = (
         """
 const { ModelAssetGuard } = require('"""
@@ -235,8 +237,6 @@ testPerfectHash();
         )
 
         output = result.stdout.strip()
-        lines = output.split("\n")
-
         encode_success = "ENCODE_SUCCESS: true" in output
         decode_success = "DECODE_SUCCESS: true" in output
         sequence_success = "SEQUENCE_SUCCESS: true" in output
@@ -349,7 +349,7 @@ def test_end_to_end() -> Dict[str, Any]:
                 "--bin",
                 "gen_perfect_hash",
                 "--manifest-path",
-                "guardd/Cargo.toml",
+                "src/rust/guardd/Cargo.toml",
                 input_vocab_file,
                 "--output",
                 output_vocab_file,
@@ -452,7 +452,7 @@ def main():
             indent=2,
         )
 
-    print(f"\nResults saved to perfect_hash_test_results.json")
+    print("\nResults saved to perfect_hash_test_results.json")
 
     # Exit with appropriate code
     if passed == total:

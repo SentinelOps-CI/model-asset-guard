@@ -17,18 +17,16 @@ import sys
 import json
 import tempfile
 import hashlib
-import subprocess
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 
-# Add the current directory to Python path
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# Add bindings directory to Python path
+REPO_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPO_ROOT / "bindings" / "python"))
 
 try:
-    import pytest
-    import torch
     import numpy as np
-    from transformers import AutoModel, AutoTokenizer, GPT2LMHeadModel, GPT2Tokenizer
+    from transformers import AutoModel, AutoTokenizer
     from pytorch_guard import ModelAssetGuard, HuggingFaceGuard, checked_load_pretrained
 
     TRANSFORMERS_AVAILABLE = True
@@ -66,7 +64,7 @@ class HuggingFaceIntegrationTester:
         for temp_file in self.temp_files:
             try:
                 os.remove(temp_file)
-            except:
+            except Exception:
                 pass
 
     def create_test_file(self, content: str) -> str:
@@ -283,14 +281,14 @@ class HuggingFaceIntegrationTester:
             try:
                 self.guard.verify_digest(test_file, invalid_digest)
                 results["errors"].append("Should have failed with invalid digest")
-            except:
+            except Exception:
                 pass  # Expected to fail
 
             # Test non-existent file
             try:
                 self.guard.verify_digest("/non/existent/file", b"0" * 32)
                 results["errors"].append("Should have failed with non-existent file")
-            except:
+            except Exception:
                 pass  # Expected to fail
 
             # Test invalid digest length
@@ -445,7 +443,7 @@ def main():
     with open("huggingface_integration_test_results.json", "w") as f:
         json.dump(results, f, indent=2)
 
-    print(f"\nTest results saved to: huggingface_integration_test_results.json")
+    print("\nTest results saved to: huggingface_integration_test_results.json")
 
     # Exit with appropriate code
     if results.get("overall_status") == "PASSED":

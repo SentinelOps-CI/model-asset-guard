@@ -10,6 +10,7 @@ pub struct PerfectHashVocab {
 
 impl PerfectHashVocab {
     /// Build a minimal perfect hash table for the given vocab
+    #[allow(dead_code)]
     pub fn build(vocab: Vec<(String, u32)>) -> Self {
         let table_size = vocab.len();
         let mut hash_table = vec![usize::MAX; table_size];

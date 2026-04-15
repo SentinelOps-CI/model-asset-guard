@@ -27,7 +27,7 @@ fn main() {
     let output_path = if args.len() > 2 { Some(&args[2]) } else { None };
 
     // Check if file exists
-    if !fs::metadata(vocab_path).is_ok() {
+    if fs::metadata(vocab_path).is_err() {
         eprintln!("Error: File '{}' not found", vocab_path);
         std::process::exit(1);
     }

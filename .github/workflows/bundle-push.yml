@@ -14,25 +14,22 @@ on:
 jobs:
   create-bundle:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
       - name: Setup Lean 4
-        run: |
-          wget -q https://github.com/leanprover/lean4/releases/download/nightly-2024-01-15/lean-4.0.0-nightly-2024-01-15-linux.tar.gz
-          tar -xzf lean-4.0.0-nightly-2024-01-15-linux.tar.gz
-          echo "$PWD/lean-4.0.0-nightly-2024-01-15-linux/bin" >> $GITHUB_PATH
+        uses: leanprover/lean-action@v1
 
       - name: Setup Rust
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          override: true
+        uses: dtolnay/rust-toolchain@stable
 
       - name: Cache dependencies
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/registry
@@ -131,8 +128,8 @@ jobs:
           2. Build and test the components:
              \`\`\`bash
              lake build
-             lake test
-             cargo test --manifest-path guardd/Cargo.toml
+             lake exe tests
+             cargo test --manifest-path src/rust/guardd/Cargo.toml
              \`\`\`
 
           ## License
@@ -167,12 +164,25 @@ jobs:
           rm -rf "$BUNDLE_DIR"
 
       - name: Upload bundle artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: model-asset-guard-bundle-${{ github.sha }}
           path: |
             model-asset-guard-*.zip
             release-info.txt
+
+      - name: Generate SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          path: .
+          output-file: sbom.spdx.json
+          format: spdx-json
+
+      - name: Upload SBOM
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-${{ github.sha }}
+          path: sbom.spdx.json
 
   publish-release:
     needs: create-bundle
@@ -184,7 +194,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Download bundle artifact
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: model-asset-guard-bundle-${{ github.sha }}
           path: ./bundles
@@ -213,7 +223,7 @@ jobs:
             To verify this release:
 
             1. Check the Lean kernel hash in `lean-hash.txt`
-            2. Run `lake build && lake test`
+            2. Run `lake build && lake exe tests`
             3. Run `cargo test --manifest-path guardd/Cargo.toml`
 
             ### Installation
@@ -240,13 +250,13 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Download bundle artifact
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: model-asset-guard-bundle-${{ github.sha }}
           path: ./bundles
 
       - name: Setup Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: "3.9"
 

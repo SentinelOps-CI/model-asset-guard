@@ -1,8 +1,7 @@
 use sha2::{Sha256, Digest};
 use std::fs::{File, OpenOptions};
-use std::io::{Read, Write, Seek, SeekFrom};
-use std::path::Path;
-use std::time::{Duration, Instant};
+use std::io::{Read, Write};
+use std::time::Instant;
 use rand::{Rng, SeedableRng};
 use rand::rngs::StdRng;
 use serde::{Serialize, Deserialize};
@@ -138,7 +137,11 @@ impl BitFlipCorpusTester {
         println!("\n=== Running {}GB Bit-Flip Test ===", file_size_gb);
         
         let start_time = Instant::now();
-        let file_size_bytes = file_size_gb * 1024 * 1024 * 1024;
+        let file_size_bytes = if file_size_gb == 0 {
+            1024 * 1024
+        } else {
+            file_size_gb * 1024 * 1024 * 1024
+        };
         
         // Create test file
         let test_file = format!("{}/test_{}gb.bin", self.temp_dir, file_size_gb);
@@ -178,7 +181,7 @@ impl BitFlipCorpusTester {
                 let mut buffer = Vec::new();
                 src.read_to_end(&mut buffer)?;
                 
-                let (corrupted_data, flipped_positions) = self.apply_bit_flips(&buffer, 0.0001, i as u64);
+                let (corrupted_data, _flipped_positions) = self.apply_bit_flips(&buffer, 0.0001, i as u64);
                 dst.write_all(&corrupted_data)?;
                 dst.flush()?;
             }
