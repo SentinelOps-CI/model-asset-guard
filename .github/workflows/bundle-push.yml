@@ -49,119 +49,34 @@ jobs:
 
       - name: Create bundle
         run: |
-          echo "Creating Model Asset Guard bundle..."
-
-          # Determine version
+          set -euo pipefail
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             VERSION="${{ github.event.inputs.version }}"
           else
             VERSION="${GITHUB_REF#refs/tags/}"
           fi
-
           echo "Creating bundle for version: $VERSION"
-
-          # Create bundle directory
-          BUNDLE_DIR="model-asset-guard-$VERSION"
-          mkdir -p "$BUNDLE_DIR"
-
-          # Copy specification files
-          echo "Copying specification files..."
-          mkdir -p "$BUNDLE_DIR/Spec"
-          cp src/lean/ModelAssetGuard/Weights.lean "$BUNDLE_DIR/Spec/" 2>/dev/null || echo "Weights.lean not found"
-          cp src/lean/ModelAssetGuard/Quant/Core.lean "$BUNDLE_DIR/Spec/" 2>/dev/null || echo "Core.lean not found"
-          cp src/lean/ModelAssetGuard/Quant/LayerBound.lean "$BUNDLE_DIR/Spec/" 2>/dev/null || echo "LayerBound.lean not found"
-          cp src/lean/ModelAssetGuard/Token/Tokenizer.lean "$BUNDLE_DIR/Spec/" 2>/dev/null || echo "Tokenizer.lean not found"
-
-          # Copy bindings
-          echo "Copying language bindings..."
-          mkdir -p "$BUNDLE_DIR/bindings"
-          cp bindings/python/pytorch_guard.py "$BUNDLE_DIR/bindings/" 2>/dev/null || echo "pytorch_guard.py not found"
-          cp bindings/nodejs/node_guard.js "$BUNDLE_DIR/bindings/" 2>/dev/null || echo "node_guard.js not found"
-
-          # Copy Rust library
-          echo "Copying Rust library..."
-          mkdir -p "$BUNDLE_DIR/guardd"
-          if [ -f "src/rust/guardd/target/release/libguardd.so" ]; then
-            cp src/rust/guardd/target/release/libguardd.so "$BUNDLE_DIR/guardd/"
-          elif [ -f "src/rust/guardd/target/release/guardd.dll" ]; then
-            cp src/rust/guardd/target/release/guardd.dll "$BUNDLE_DIR/guardd/"
-          elif [ -f "src/rust/guardd/target/release/libguardd.dylib" ]; then
-            cp src/rust/guardd/target/release/libguardd.dylib "$BUNDLE_DIR/guardd/"
-          else
-            echo "Warning: No Rust library found"
+          # Canonical packager (honest README + axioms inventory + guardd bin helpers).
+          bash scripts/bundle.sh
+          # Rename dated artifact to versioned name for releases.
+          SRC="$(ls -1 model-asset-guard-*.zip | head -1)"
+          DST="model-asset-guard-${VERSION}.zip"
+          if [ "$SRC" != "$DST" ]; then
+            mv "$SRC" "$DST"
           fi
-
-          # Copy configuration files
-          echo "Copying configuration files..."
-          cp lakefile.lean "$BUNDLE_DIR/"
-          cp lean-toolchain "$BUNDLE_DIR/"
-          cp LICENSE "$BUNDLE_DIR/"
-
-          # Generate Lean kernel hash
-          echo "Generating Lean kernel hash..."
-          KERNEL_HASH=$(lake exe lean --version 2>/dev/null | head -1 | sha256sum | cut -d' ' -f1)
-          echo "$KERNEL_HASH" > "$BUNDLE_DIR/lean-hash.txt"
-
-          # Create bundle README
-          cat > "$BUNDLE_DIR/README.md" << EOF
-          # Model Asset Guard Bundle v$VERSION
-
-          This bundle contains the verified components of the Model Asset Guard system.
-
-          ## Contents
-
-          - \`Spec/\` - Lean specification files with formal proofs
-          - \`guardd/\` - Rust sidecar library for high-performance validation
-          - \`bindings/\` - Python and Node.js bindings
-          - \`lean-hash.txt\` - Lean kernel hash for verification
-
-          ## Verification
-
-          To verify this bundle:
-
-          1. Check the Lean kernel hash:
-             \`\`\`bash
-             lake exe lean --version | head -1 | sha256sum
-             \`\`\`
-             Compare with the contents of \`lean-hash.txt\`
-
-          2. Build and test the components:
-             \`\`\`bash
-             lake build
-             lake exe tests
-             cargo test --manifest-path src/rust/guardd/Cargo.toml
-             \`\`\`
-
-          ## License
-
-          MIT License - see LICENSE file for details.
-          EOF
-
-          # Create bundle archive
-          BUNDLE_NAME="model-asset-guard-$VERSION.zip"
-          echo "Creating bundle archive: $BUNDLE_NAME"
-          zip -r "$BUNDLE_NAME" "$BUNDLE_DIR"
-
-          # Generate SHA-256 of bundle
-          BUNDLE_SHA256=$(sha256sum "$BUNDLE_NAME" | cut -d' ' -f1)
-          echo "Bundle SHA-256: $BUNDLE_SHA256"
-
-          # Create release info
-          cat > "release-info.txt" << EOF
+          # Refresh release-info with version tag.
+          BUNDLE_SHA256="$(sha256sum "$DST" | cut -d' ' -f1)"
+          cat > release-info.txt << EOF
           Model Asset Guard Bundle
           Version: $VERSION
-          Date: $(date)
-          Bundle: $BUNDLE_NAME
+          Date: $(date -u)
+          Bundle: $DST
           SHA-256: $BUNDLE_SHA256
-          Kernel Hash: $KERNEL_HASH
+          Formal completeness: NOT claimed (see docs/axioms.md)
+          Hash vocab: CHD MPH by default (kind=chd_mph); legacy open-address still loads
           EOF
-
-          echo "Bundle created successfully!"
-          echo "Bundle: $BUNDLE_NAME"
+          echo "Bundle: $DST"
           echo "SHA-256: $BUNDLE_SHA256"
-
-          # Cleanup
-          rm -rf "$BUNDLE_DIR"
 
       - name: Upload bundle artifact
         uses: actions/upload-artifact@v4
@@ -184,10 +99,38 @@ jobs:
           name: sbom-${{ github.sha }}
           path: sbom.spdx.json
 
+  # Wave 19: multi-OS native libs attached to the GitHub Release (not npm/PyPI).
+  native-libs:
+    name: Release native (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    if: startsWith(github.ref, 'refs/tags/')
+    defaults:
+      run:
+        shell: bash
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build + stage release guardd
+        run: |
+          set -euo pipefail
+          cargo build --release --manifest-path src/rust/guardd/Cargo.toml --locked
+          bash scripts/stage_guardd_native.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-native-${{ matrix.os }}
+          path: dist/native/
+          if-no-files-found: error
+
   publish-release:
-    needs: create-bundle
+    needs: [create-bundle, native-libs]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout code
@@ -199,48 +142,68 @@ jobs:
           name: model-asset-guard-bundle-${{ github.sha }}
           path: ./bundles
 
+      - name: Download native artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-native-*
+          path: ./natives
+          merge-multiple: false
+
+      - name: Pack per-OS native zips
+        run: |
+          set -euo pipefail
+          mkdir -p ./native-zips
+          for d in ./natives/release-native-*; do
+            [[ -d "$d" ]] || continue
+            os="$(basename "$d" | sed 's/^release-native-//')"
+            (cd "$d" && zip -r "$GITHUB_WORKSPACE/native-zips/guardd-native-${os}.zip" .)
+          done
+          ls -la ./native-zips
+
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           files: |
             bundles/model-asset-guard-*.zip
             bundles/release-info.txt
+            native-zips/guardd-native-*.zip
           body: |
-            ## Model Asset Guard v${{ github.ref_name }}
+            ## Model Asset Guard ${{ github.ref_name }}
 
-            This release includes:
+            Runtime bundle with Lean specs + Rust `guardd` + Python/Node bindings.
 
-            - ✅ Formal verification of all specifications
-            - ✅ High-performance Rust sidecar library
-            - ✅ Python and Node.js bindings
-            - ✅ Comprehensive test suite
-            - ✅ Bit-flip corpus validation
-            - ✅ Quantization error bounds with 128-vector verification
-            - ✅ Perfect hash tokenizer implementation
+            **Formal completeness is not claimed.** See `docs/axioms.md`.
+            Hash vocab defaults to **CHD MPH** (`kind: "chd_mph"`); legacy open-address JSON still loads.
+
+            ### Native libraries (per OS)
+
+            Release assets `guardd-native-<os>.zip` contain the staged `libguardd` /
+            `guardd.dll` for that runner. These are **GitHub Release binaries**, not
+            npm/PyPI embedded prebuilts. Locally you can also:
+
+            ```bash
+            # Prefers these release zips; CI artifacts are fallback for unreleased commits
+            bash scripts/fetch_guardd_native.sh   # needs gh CLI
+            # or
+            cargo build --release --manifest-path src/rust/guardd/Cargo.toml
+            bash scripts/stage_guardd_native.sh
+            ```
 
             ### Verification
 
-            To verify this release:
-
-            1. Check the Lean kernel hash in `lean-hash.txt`
-            2. Run `lake build && lake exe tests`
-            3. Run `cargo test --manifest-path guardd/Cargo.toml`
+            1. Inspect `docs/axioms.md` / `docs/perfect-hash-tokenizer.md`
+            2. `lake build && lake exe tests && python scripts/check_axioms.py`
+            3. `cargo test --manifest-path src/rust/guardd/Cargo.toml --locked`
 
             ### Installation
 
-            Extract the bundle and follow the README for integration instructions.
-
-            ### SHA-256
-
-            ```
-            $(cat bundles/release-info.txt | grep SHA-256 | cut -d' ' -f2)
-            ```
+            Extract the bundle and follow its README.
           draft: false
           prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  publish-to-registry:
+  build-python-package:
     needs: create-bundle
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
@@ -249,40 +212,24 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Download bundle artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: model-asset-guard-bundle-${{ github.sha }}
-          path: ./bundles
-
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.9"
+          python-version: "3.11"
 
-      - name: Install Python dependencies
-        run: |
-          pip install build twine
+      - name: Install build tooling
+        run: python -m pip install --upgrade pip build
 
-      - name: Build Python package
-        run: |
-          cd bindings/python
-          python -m build
+      - name: Build Python package (sdist/wheel; no auto-publish)
+        run: python -m build
 
-      - name: Publish to PyPI
-        if: github.ref == 'refs/tags/main'
-        run: |
-          cd bindings/python
-          python -m twine upload dist/* --username __token__ --password ${{ secrets.PYPI_TOKEN }}
-        env:
-          TWINE_USERNAME: __token__
-          TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
+      - name: Upload Python dist artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-dist-${{ github.sha }}
+          path: dist/*
 
-      - name: Publish to Test PyPI
-        if: github.ref != 'refs/tags/main'
-        run: |
-          cd bindings/python
-          python -m twine upload --repository testpypi dist/* --username __token__ --password ${{ secrets.TEST_PYPI_TOKEN }}
-        env:
-          TWINE_USERNAME: __token__
-          TWINE_PASSWORD: ${{ secrets.TEST_PYPI_TOKEN }}
+      # PyPI upload is intentionally not automated here: packaging is real via
+      # root pyproject.toml, but publishing requires an explicit human/release step
+      # with configured trusted publishing or tokens.
+
