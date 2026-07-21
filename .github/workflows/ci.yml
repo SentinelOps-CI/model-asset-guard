@@ -16,8 +16,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
-
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    defaults:
+      run:
+        shell: bash
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -55,7 +57,79 @@ jobs:
           pip install ruff pytest pytest-cov
 
       - name: Run canonical preflight
+        shell: bash
         run: bash scripts/ci_preflight.sh
+
+      - name: Node smoke (skip if koffi/lib unavailable)
+        shell: bash
+        working-directory: bindings/nodejs
+        run: |
+          set -euo pipefail
+          ROOT="${GITHUB_WORKSPACE}"
+          GUARDD_LIB=""
+          for cand in \
+            "$ROOT/bindings/nodejs/native/libguardd.so" \
+            "$ROOT/bindings/nodejs/native/libguardd.dylib" \
+            "$ROOT/bindings/nodejs/native/guardd.dll" \
+            "$ROOT/dist/native/libguardd.so" \
+            "$ROOT/dist/native/libguardd.dylib" \
+            "$ROOT/dist/native/guardd.dll" \
+            "$ROOT/src/rust/guardd/target/debug/libguardd.so" \
+            "$ROOT/src/rust/guardd/target/release/libguardd.so" \
+            "$ROOT/src/rust/guardd/target/debug/libguardd.dylib" \
+            "$ROOT/src/rust/guardd/target/release/libguardd.dylib" \
+            "$ROOT/src/rust/guardd/target/debug/guardd.dll" \
+            "$ROOT/src/rust/guardd/target/release/guardd.dll"; do
+            if [ -f "$cand" ]; then
+              GUARDD_LIB="$cand"
+              break
+            fi
+          done
+          # Fallback: first matching cdylib under target (ubuntu/mac layout variance).
+          if [ -z "$GUARDD_LIB" ]; then
+            GUARDD_LIB="$(find "$ROOT/src/rust/guardd/target" \
+              \( -name 'libguardd.so' -o -name 'libguardd.dylib' -o -name 'guardd.dll' \) \
+              2>/dev/null | head -n 1 || true)"
+          fi
+          if [ -n "$GUARDD_LIB" ]; then
+            export GUARDD_LIB
+            echo "GUARDD_LIB=$GUARDD_LIB"
+          else
+            echo "WARN: libguardd not found under target/; Node smoke will skip if unresolved"
+            ls -la "$ROOT/src/rust/guardd/target/debug" 2>/dev/null || true
+            ls -la "$ROOT/src/rust/guardd/target/release" 2>/dev/null || true
+          fi
+          npm install --no-fund --no-audit
+          set +e
+          npm test
+          code=$?
+          set -e
+          if [ "$code" -eq 0 ]; then
+            echo "Node smoke passed"
+          elif [ "$code" -eq 2 ]; then
+            echo "Node smoke skipped (native dep or libguardd unavailable)"
+          else
+            echo "Node smoke failed with exit $code"
+            exit "$code"
+          fi
+
+      - name: Stage release guardd native library
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build --release --manifest-path src/rust/guardd/Cargo.toml --locked
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            pwsh -File scripts/stage_guardd_native.ps1 -Profile release
+          else
+            bash scripts/stage_guardd_native.sh
+          fi
+
+      - name: Upload guardd native artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: guardd-native-${{ matrix.os }}
+          path: dist/native/
+          if-no-files-found: error
 
       - name: Upload quality artifacts
         if: always()

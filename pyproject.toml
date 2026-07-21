@@ -1,3 +1,34 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "model-asset-guard"
+version = "0.1.0"
+description = "Python bindings for Model Asset Guard (Rust guardd sidecar)"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+authors = [{ name = "Model Asset Guard contributors" }]
+dependencies = []
+
+[project.optional-dependencies]
+quant = ["numpy"]
+hf = ["numpy", "transformers", "torch"]
+dev = ["pytest", "pytest-cov", "ruff"]
+
+[project.urls]
+Repository = "https://github.com/SentinelOps-CI/model-asset-guard"
+
+[project.scripts]
+model-asset-guard-fetch-native = "fetch_native:main"
+
+[tool.setuptools]
+py-modules = ["pytorch_guard", "fetch_native"]
+
+[tool.setuptools.package-dir]
+"" = "bindings/python"
+
 [tool.ruff]
 line-length = 100
 target-version = "py311"
@@ -8,4 +39,7 @@ select = ["E", "F", "I", "B", "UP"]
 [tool.pytest.ini_options]
 testpaths = ["tests/e2e"]
 pythonpath = ["bindings/python"]
-addopts = "-ra"
+addopts = "-ra -m 'not integration'"
+markers = [
+    "integration: requires network, HuggingFace downloads, Node, Lean CLI, or optional packages",
+]

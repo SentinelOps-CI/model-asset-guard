@@ -1,38 +1,54 @@
-import ModelAssetGuard.Token.Tokenizer
+import ModelAssetGuard.RustSidecar
 import Init.System.IO
-import Init.Data.List.Basic
-import Init.Data.String.Basic
 
+open ModelAssetGuard.RustSidecar
+
+/--
+TokenizerTest Lean CLI.
+
+Runs real vocab round-trip checks via `guardd_perfect_hash test`.
+Supports open-addressed hash vocab JSON/txt and SentencePiece `.model`
+(ModelProto pieces; CHAR/BPE/UNIGRAM encode is `guardd_perfect_hash sp-encode`).
+Does not claim full official SentencePiece parity.
+-/
 def main (args : List String) : IO UInt32 := do
+  let args := stripLakeDashDash args
   match args with
   | [] => do
-    IO.println "Usage: tokenizer-test <tokenizer_path> [--type <bpe|sentencepiece>] [--fuzz <num_tests>]"
+    IO.println "Usage: tokenizertest <vocab.json|vocab.txt|.model> [--type <perfecthash|sentencepiece>] [--fuzz <n>]"
+    IO.println ""
+    IO.println "Runtime checks go through Rust guardd_perfect_hash:"
+    IO.println "  - JSON/txt: open-addressed hash vocab round-trip"
+    IO.println "  - .model: ModelProto pieces + vocab round-trip (reports encode gate)"
+    IO.println "For CHAR/BPE/UNIGRAM segmentation: guardd_perfect_hash sp-encode (docs/sentencepiece-bpe.md)."
+    IO.println "Lean structural multi-merge lemmas are separate from SP score-BPE."
+    IO.println ""
+    IO.println "Build helper:"
+    IO.println "  cargo build --release --manifest-path src/rust/guardd/Cargo.toml --bin guardd_perfect_hash"
     return 1
-  | tokenizerPath :: rest => do
-    let mut tokenizerType := "bpe"
-    let mut fuzzTests := none
-
-    -- Parse arguments
-    let mut i := 0
+  | path :: rest => do
+    let mut tokType : String := "auto"
+    let mut fuzz : Option Nat := none
+    let mut i : Nat := 0
     while i < rest.length do
-      match rest.get? i with
+      match rest[i]? with
       | some "--type" =>
-        match rest.get? (i + 1) with
+        match rest[i + 1]? with
         | some t =>
-          tokenizerType := t
+          tokType := t
           i := i + 2
         | none => do
           IO.println "Error: --type requires a value"
           return 1
       | some "--fuzz" =>
-        match rest.get? (i + 1) with
-        | some num =>
-          match String.toNat? num with
+        match rest[i + 1]? with
+        | some nStr =>
+          match nStr.toNat? with
           | some n =>
-            fuzzTests := some n
+            fuzz := some n
             i := i + 2
           | none => do
-            IO.println "Error: --fuzz requires a numeric value"
+            IO.println "Error: --fuzz requires a non-negative integer"
             return 1
         | none => do
           IO.println "Error: --fuzz requires a value"
@@ -42,51 +58,32 @@ def main (args : List String) : IO UInt32 := do
         return 1
       | none => break
 
-    -- Create sample tokenizer (in practice, this would load from file)
-    let tokenizer := match tokenizerType with
-      | "bpe" => BPETokenizer.mk
-        [("hello", 1), ("world", 2), ("test", 3)]
-        [("he", "llo", "hello")]
-      | "sentencepiece" => SentencePieceTokenizer.mk
-        [("hello", 1), ("world", 2), ("test", 3)]
-        #[] -- Empty protobuf for demo
-      | _ => do
-        IO.println s!"Unknown tokenizer type: {tokenizerType}"
-        return 1
+    let lower := path.toLower
+    let looksModel := lower.endsWith ".model" || lower.endsWith ".proto"
+    match tokType with
+    | "auto" | "perfecthash" | "perfect-hash" | "mph" | "sentencepiece" | "sp" =>
+      if tokType == "sentencepiece" || tokType == "sp" then
+        if !looksModel then
+          IO.println "Error: --type sentencepiece requires a .model / .proto ModelProto file."
+          return 1
+      pure ()
+    | "bpe" => do
+      IO.println "Error: tokenizer type 'bpe' is not a tokenizertest mode."
+      IO.println "Structural Lean merges: lake tests. SP CHAR/BPE/UNIGRAM: guardd_perfect_hash sp-encode."
+      return 1
+    | other => do
+      IO.println s!"Error: unknown tokenizer type '{other}'"
+      return 1
 
-    -- Test basic determinism
-    IO.println s!"Testing {tokenizerType} tokenizer determinism..."
-    let testStrings := ["hello world", "test string", "determinism test"]
+    let fp : System.FilePath := path
+    if !(← fp.pathExists) then
+      IO.println s!"Error: vocab file not found: {path}"
+      return 1
 
-    let mut allPassed := true
-    for testStr in testStrings do
-      let tokens := encode tokenizer testStr
-      let decoded := decode tokenizer tokens
-      let passed := decoded == testStr
-
-      if passed then
-        IO.println s!"✓ '{testStr}' → {tokens} → '{decoded}'"
-      else
-        IO.println s!"✗ '{testStr}' → {tokens} → '{decoded}'"
-        allPassed := false
-
-    -- Fuzz testing
-    match fuzzTests with
-    | some numTests => do
-      IO.println s!"Running fuzz test with {numTests} random strings..."
-      let fuzzResult ← fuzz_test_tokenizer tokenizer numTests
-
-      if fuzzResult then
-        IO.println s!"✓ Fuzz test passed ({numTests} tests)"
-      else
-        IO.println s!"✗ Fuzz test failed ({numTests} tests)"
-        allPassed := false
+    match fuzz with
+    | some n =>
+      if n > 0 then
+        IO.println s!"Note: --fuzz {n} requests extra trials; Rust validate_roundtrip covers the vocab."
     | none => pure ()
 
-    -- Final result
-    if allPassed then
-      IO.println "All tests passed"
-      return 0
-    else
-      IO.println "Some tests failed"
-      return 1
+    runExitCode "guardd_perfect_hash" #["test", path]

@@ -6,7 +6,6 @@ on:
   pull_request:
     branches: [main]
   schedule:
-    # Run formal verification daily at 2 AM UTC
     - cron: "0 2 * * *"
 
 jobs:
@@ -22,6 +21,11 @@ jobs:
       - name: Setup Lean 4
         uses: leanprover/lean-action@v1
 
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
       - name: Cache Lean dependencies
         uses: actions/cache@v4
         with:
@@ -30,40 +34,23 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-lean-
 
-      # Lean warnings fail the build: `lakefile.lean` sets `-DwarningAsError=true` on the package.
+      # Lean warnings fail the build: `lakefile.lean` sets `-DwarningAsError=true`.
       - name: Build Lean project
         run: lake build
 
-      - name: Run formal verification
+      - name: Build Lean CLI targets
         run: |
           set -euo pipefail
-          echo "Running formal verification of Model Asset Guard specifications..."
-
-          # Verify core specifications
           lake build ModelAssetGuard
-
-          # Verify quantization bounds
-          lake build quantbound
-
-          # Verify tokenizer specifications
-          lake build tokenizertest
-
-          # Verify weight integrity specifications
-          lake build verifyweights
-
-          # Verify bit-flip corpus specifications
-          lake build bitflipcorpus
-
-          # Verify 128-vector quantization verification
-          lake build quantverify128
-
-          # Verify perfect hash tokenizer
-          lake build perfecthash
-
-          echo "✅ All formal specifications verified successfully"
+          lake build quantbound tokenizertest verifyweights bitflipcorpus quantverify128 perfecthash benchmarks tests
 
       - name: Run Lean tests
         run: lake exe tests
+
+      - name: Axiom inventory gate
+        run: |
+          python scripts/check_axioms.py
+          echo "Formal completeness is NOT claimed; see docs/axioms.md"
 
       - name: Check for sorry statements
         run: |
@@ -78,45 +65,41 @@ PY
 )
           echo "Found $SORRY_COUNT sorry statements"
           test "$SORRY_COUNT" -eq 0
-
-      - name: Verify type safety
-        run: |
-          echo "Verifying type safety of all Lean specifications..."
-          lake build --no-deps
-          echo "✅ All specifications are type-safe"
+          echo "SORRY_COUNT=$SORRY_COUNT" >> "$GITHUB_ENV"
 
       - name: Generate verification report
         run: |
-          echo "Generating formal verification report..."
-
+          AXIOM_COUNT=$(python - <<'PY'
+import re
+from pathlib import Path
+text = Path("docs/axioms.md").read_text(encoding="utf-8")
+m = re.search(r"\*\*Count:\*\*\s*(\d+)\s*axioms", text)
+print(m.group(1) if m else "?")
+PY
+)
           cat > verification_report.md << EOF
-          # Formal Verification Report
+# Formal Verification Report
 
-          **Date:** $(date)
-          **Commit:** ${{ github.sha }}
-          **Branch:** ${{ github.ref_name }}
+**Date:** $(date -u)
+**Commit:** ${{ github.sha }}
+**Branch:** ${{ github.ref_name }}
 
-          ## Verification Results
+## What this job checks
 
-          ### Core Specifications
-          - ✅ ModelAssetGuard: Verified
-          - ✅ QuantBound: Verified  
-          - ✅ TokenizerTest: Verified
-          - ✅ VerifyWeights: Verified
-          - ✅ BitFlipCorpus: Verified
-          - ✅ QuantVerify128: Verified
-          - ✅ PerfectHash: Verified
+- Lean package builds with \`warningAsError\`
+- Lean CLI targets build
+- \`lake exe tests\` passes
+- \`sorry\` count is zero
+- Axiom inventory matches \`docs/axioms.md\` (count: ${AXIOM_COUNT})
 
-          ### Type Safety
-          - ✅ All specifications are type-safe
+## What this job does NOT claim
 
-          ### Incomplete Proofs
-          - Found $SORRY_COUNT sorry statements
+- Formal completeness
+- That Float / opaque obligation markers are proven theorems
+- That runtime CLIs are proven correct in Lean (they delegate to Rust)
 
-          ## Summary
-          All formal specifications have been verified successfully.
-          EOF
-
+See \`docs/axioms.md\` for the explicit axiom list.
+EOF
           echo "Report generated: verification_report.md"
 
       - name: Upload verification report
@@ -132,10 +115,9 @@ PY
           script: |
             const fs = require('fs');
             const report = fs.readFileSync('verification_report.md', 'utf8');
-
             github.rest.issues.createComment({
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: `## Formal Verification Results ✅\n\n${report}`
+              body: `## Formal verification job\n\n${report}`
             });

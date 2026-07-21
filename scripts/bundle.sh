@@ -1,167 +1,157 @@
 #!/bin/bash
+# Create a distributable bundle of specs, bindings, and a built guardd library.
+# Does not claim formal completeness.
 
-set -e
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT_DIR"
 
 echo "Creating Model Asset Guard bundle..."
 
-# Create bundle directory
 BUNDLE_DIR="model-asset-guard-bundle"
 rm -rf "$BUNDLE_DIR"
 mkdir -p "$BUNDLE_DIR"
 
-# Copy specification files
 echo "Copying specification files..."
-mkdir -p "$BUNDLE_DIR/Spec"
+mkdir -p "$BUNDLE_DIR/Spec/Quant" "$BUNDLE_DIR/Spec/Token" "$BUNDLE_DIR/docs"
+cp src/lean/ModelAssetGuard.lean "$BUNDLE_DIR/Spec/" 2>/dev/null || true
 cp src/lean/ModelAssetGuard/Weights.lean "$BUNDLE_DIR/Spec/"
-cp src/lean/ModelAssetGuard/Quant/Core.lean "$BUNDLE_DIR/Spec/"
-cp src/lean/ModelAssetGuard/Quant/LayerBound.lean "$BUNDLE_DIR/Spec/"
-cp src/lean/ModelAssetGuard/Token/Tokenizer.lean "$BUNDLE_DIR/Spec/"
-
-# Copy HuggingFace integration files (G-3 requirement)
-echo "Copying HuggingFace integration files..."
-mkdir -p "$BUNDLE_DIR/bindings"
-cp bindings/python/pytorch_guard.py "$BUNDLE_DIR/bindings/"
-cp bindings/nodejs/node_guard.js "$BUNDLE_DIR/bindings/"
-cp tests/e2e/test_huggingface_integration.py "$BUNDLE_DIR/bindings/"
-
-# Copy perfect hash tokenizer files (T-3 requirement)
-echo "Copying perfect hash tokenizer files..."
-cp tests/e2e/test_perfect_hash_integration.py "$BUNDLE_DIR/bindings/"
-mkdir -p "$BUNDLE_DIR/docs"
+cp src/lean/ModelAssetGuard/RustSidecar.lean "$BUNDLE_DIR/Spec/"
+cp src/lean/ModelAssetGuard/Quant/Core.lean "$BUNDLE_DIR/Spec/Quant/"
+cp src/lean/ModelAssetGuard/Quant/LayerBound.lean "$BUNDLE_DIR/Spec/Quant/"
+cp src/lean/ModelAssetGuard/Quant/Fixed.lean "$BUNDLE_DIR/Spec/Quant/"
+cp src/lean/ModelAssetGuard/Token/Tokenizer.lean "$BUNDLE_DIR/Spec/Token/"
+cp docs/axioms.md "$BUNDLE_DIR/docs/"
 cp docs/perfect-hash-tokenizer.md "$BUNDLE_DIR/docs/"
+cp docs/float-obligation.md "$BUNDLE_DIR/docs/"
+cp docs/sentencepiece-bpe.md "$BUNDLE_DIR/docs/"
+cp docs/native-packaging.md "$BUNDLE_DIR/docs/"
 
-# Copy examples
-echo "Copying examples..."
-mkdir -p "$BUNDLE_DIR/examples"
-cp examples/huggingface_example.py "$BUNDLE_DIR/examples/"
+echo "Copying bindings..."
+mkdir -p "$BUNDLE_DIR/bindings/python" "$BUNDLE_DIR/bindings/nodejs"
+cp bindings/python/pytorch_guard.py "$BUNDLE_DIR/bindings/python/"
+cp bindings/nodejs/node_guard.js "$BUNDLE_DIR/bindings/nodejs/"
+cp bindings/nodejs/package.json "$BUNDLE_DIR/bindings/nodejs/"
+cp bindings/nodejs/README.md "$BUNDLE_DIR/bindings/nodejs/"
+cp pyproject.toml "$BUNDLE_DIR/"
 
-# Copy extracted Rust library
-echo "Copying Rust library..."
-mkdir -p "$BUNDLE_DIR/guardd"
-if [ -f "src/rust/guardd/target/release/libguardd.so" ]; then
-    cp src/rust/guardd/target/release/libguardd.so "$BUNDLE_DIR/guardd/"
-else
-    echo "Warning: libguardd.so not found, building..."
-    cargo build --release --manifest-path src/rust/guardd/Cargo.toml
-    cp src/rust/guardd/target/release/libguardd.so "$BUNDLE_DIR/guardd/"
+if [ -f examples/huggingface_example.py ]; then
+  mkdir -p "$BUNDLE_DIR/examples"
+  cp examples/huggingface_example.py "$BUNDLE_DIR/examples/"
 fi
 
-# Generate Lean kernel hash
-echo "Generating Lean kernel hash..."
-lake build
-KERNEL_HASH=$(lake exe lean --version 2>/dev/null | head -1 | sha256sum | cut -d' ' -f1)
-echo "$KERNEL_HASH" > "$BUNDLE_DIR/lean-hash.txt"
+echo "Copying Rust library (platform-specific)..."
+mkdir -p "$BUNDLE_DIR/guardd"
+LIB_COPIED=0
+for candidate in \
+  src/rust/guardd/target/release/libguardd.so \
+  src/rust/guardd/target/release/guardd.dll \
+  src/rust/guardd/target/release/libguardd.dylib \
+  src/rust/guardd/target/debug/libguardd.so \
+  src/rust/guardd/target/debug/guardd.dll \
+  src/rust/guardd/target/debug/libguardd.dylib
+do
+  if [ -f "$candidate" ]; then
+    cp "$candidate" "$BUNDLE_DIR/guardd/"
+    LIB_COPIED=1
+    break
+  fi
+done
 
-# Create README for bundle
+if [ "$LIB_COPIED" -eq 0 ]; then
+  echo "guardd library not found; building release..."
+  cargo build --release --manifest-path src/rust/guardd/Cargo.toml --locked
+  for candidate in \
+    src/rust/guardd/target/release/libguardd.so \
+    src/rust/guardd/target/release/guardd.dll \
+    src/rust/guardd/target/release/libguardd.dylib
+  do
+    if [ -f "$candidate" ]; then
+      cp "$candidate" "$BUNDLE_DIR/guardd/"
+      LIB_COPIED=1
+      break
+    fi
+  done
+fi
+
+if [ "$LIB_COPIED" -eq 0 ]; then
+  echo "Error: could not locate or build guardd shared library"
+  exit 1
+fi
+
+# Copy CLI helpers when present (best-effort)
+mkdir -p "$BUNDLE_DIR/guardd/bin"
+for bin in guardd_sha256 guardd_perfect_hash guardd_bitflip guardd_quant128 gen_perfect_hash; do
+  for ext in "" .exe; do
+    for profile in release debug; do
+      candidate="src/rust/guardd/target/${profile}/${bin}${ext}"
+      if [ -f "$candidate" ]; then
+        cp "$candidate" "$BUNDLE_DIR/guardd/bin/"
+      fi
+    done
+  done
+done
+
+echo "Generating Lean toolchain stamp..."
+lake build
+KERNEL_HASH=$( (lake --version 2>/dev/null || true; cat lean-toolchain) | sha256sum | cut -d' ' -f1 )
+echo "$KERNEL_HASH" > "$BUNDLE_DIR/lean-hash.txt"
+cp lean-toolchain "$BUNDLE_DIR/"
+cp lakefile.lean "$BUNDLE_DIR/"
+cp LICENSE "$BUNDLE_DIR/" 2>/dev/null || true
+
 cat > "$BUNDLE_DIR/README.md" << 'EOF'
 # Model Asset Guard Bundle
 
-This bundle contains the verified components of the Model Asset Guard system.
+Runtime-checked components plus Lean specifications. Formal completeness is
+**not** claimed; see `docs/axioms.md`.
 
 ## Contents
 
-- `Spec/` - Lean specification files with formal proofs
-- `guardd/` - Rust sidecar library for high-performance validation
-- `bindings/` - Python and Node.js bindings for HuggingFace integration (G-3)
-- `docs/` - Documentation including perfect hash tokenizer (T-3)
-- `lean-hash.txt` - Lean kernel hash for verification
+- `Spec/` — Lean specifications (0 axioms; Float markers; Int/Fixed + BPE lemmas)
+- `guardd/` — Rust sidecar library (+ `bin/` helpers when built)
+- `bindings/` — Python and Node.js bindings
+- `docs/axioms.md` — axiom inventory (must stay at 0)
+- `docs/float-obligation.md` — Float bridge path (markers, not proofs)
+- `docs/sentencepiece-bpe.md` — SP/BPE support matrix (honest gaps)
+- `docs/perfect-hash-tokenizer.md` — open-addressed hash vocab (not MPH)
+- `docs/native-packaging.md` — local stage + CI artifact path (no fake npm binaries)
+- `lean-hash.txt` — toolchain/content stamp (not a proof certificate)
 
 ## Verification
 
-To verify this bundle:
-
-1. Check the Lean kernel hash:
-   ```bash
-   lake exe lean --version | head -1 | sha256sum
-   ```
-   Compare with the contents of `lean-hash.txt`
-
-2. Build and test the components:
-   ```bash
-   lake build
-   lake exe tests
-   cargo test --manifest-path src/rust/guardd/Cargo.toml
-   ```
-
-3. Run the benchmark suite:
-   ```bash
-   ./bench/run.sh
-   ```
-
-4. Test HuggingFace integration:
-   ```bash
-   pip install transformers torch numpy
-   python3 bindings/test_huggingface_integration.py
-   ```
-
-5. Test perfect hash tokenizer:
-   ```bash
-   python3 bindings/test_perfect_hash_integration.py
-   lake exe perfecthash test vocab.json
-   ```
-
-## Integration
-
-### Python/HuggingFace Integration
-
-The `pytorch_guard.py` module provides seamless integration with HuggingFace transformers:
-
-```python
-from bindings.pytorch_guard import checked_load_pretrained
-
-# Load a model with full verification
-model, tokenizer, verification_results = checked_load_pretrained(
-    "gpt2",
-    verify_quantization=True
-)
+```bash
+lake build && lake exe tests
+python scripts/check_axioms.py
+cargo test --manifest-path src/rust/guardd/Cargo.toml --locked
+pytest tests/e2e -m "not integration"
 ```
 
-### Node.js Integration
+## Integration notes
 
-The `node_guard.js` module provides JavaScript/TypeScript bindings:
-
-```javascript
-const { createGuard } = require('./bindings/node_guard.js');
-
-const guard = createGuard();
-const verified = guard.verifyDigest('model.bin', expectedDigest);
-
-// Perfect hash tokenizer
-const tokens = guard.perfectHashEncode(vocabJson, "hello world");
-const decoded = guard.perfectHashDecodeSequence(vocabJson, tokens);
-```
-
-### Direct FFI Integration
-
-The `libguardd.so` library can be integrated directly:
-
-```python
-import ctypes
-lib = ctypes.CDLL("./guardd/libguardd.so")
-# Use the FFI functions for model validation
-```
-
-## License
-
-MIT License - see the main repository for details.
+- Python: `pip install .` from the bundle root (module `pytorch_guard`); set
+  `GUARDD_LIB` or place the library under `bindings/python/native/`
+- Node: `cd bindings/nodejs && npm install` — requires staged/built `guardd`
+  (see `docs/native-packaging.md`); npm does not ship prebuilts
+- Hash vocab is a deterministic open-addressed table, not a proven MPH
+- SentencePiece: see `docs/sentencepiece-bpe.md` (not full SP parity)
 EOF
 
-# Create bundle archive
 BUNDLE_NAME="model-asset-guard-$(date +%Y%m%d).zip"
 echo "Creating bundle archive: $BUNDLE_NAME"
 zip -r "$BUNDLE_NAME" "$BUNDLE_DIR"
 
-# Generate SHA-256 of bundle
 BUNDLE_SHA256=$(sha256sum "$BUNDLE_NAME" | cut -d' ' -f1)
 echo "Bundle SHA-256: $BUNDLE_SHA256"
 
-# Create release info
 cat > "release-info.txt" << EOF
 Model Asset Guard Bundle
 Date: $(date)
 Bundle: $BUNDLE_NAME
 SHA-256: $BUNDLE_SHA256
 Kernel Hash: $KERNEL_HASH
+Formal completeness: NOT claimed (see docs/axioms.md)
 EOF
 
 echo "Bundle created successfully!"
@@ -169,5 +159,4 @@ echo "Bundle: $BUNDLE_NAME"
 echo "SHA-256: $BUNDLE_SHA256"
 echo "Release info saved to: release-info.txt"
 
-# Cleanup
-rm -rf "$BUNDLE_DIR" 
+rm -rf "$BUNDLE_DIR"
