@@ -1,0 +1,34 @@
+{
+  "name": "@model-asset-guard/node",
+  "version": "0.1.0",
+  "description": "Node.js bindings for Model Asset Guard (Rust guardd sidecar via koffi)",
+  "main": "node_guard.js",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "test": "node smoke_test.js",
+    "smoke": "node smoke_test.js",
+    "selfcheck": "node node_guard.js",
+    "fetch-native": "node fetch_native.js"
+  },
+  "dependencies": {
+    "koffi": "^2.9.0"
+  },
+  "files": [
+    "node_guard.js",
+    "smoke_test.js",
+    "fetch_native.js",
+    "README.md",
+    "native/README.md"
+  ],
+  "keywords": [
+    "model-asset-guard",
+    "sha256",
+    "quantization",
+    "koffi",
+    "ffi"
+  ],
+  "license": "MIT"
+}
