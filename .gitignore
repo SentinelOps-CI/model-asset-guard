@@ -73,6 +73,10 @@ bench/
 *.dylib
 *.bin
 
+# Staged native sidecar copies (local/CI fetch only; not published prebuilts)
+bindings/*/native/STAGED.txt
+dist/native/
+
 # Ignore release info and test result files
 release-info.txt
 test_results.json
