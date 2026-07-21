@@ -1,4 +1,9 @@
 import ModelAssetGuard.Weights
+import ModelAssetGuard.RustSidecar
 import ModelAssetGuard.Quant.Core
+import ModelAssetGuard.Quant.Fixed
 import ModelAssetGuard.Quant.LayerBound
 import ModelAssetGuard.Token.Tokenizer
+import ModelAssetGuard.Token.CHD
+import ModelAssetGuard.Token.HashSeeded
+import ModelAssetGuard.Token.CHDBuild
