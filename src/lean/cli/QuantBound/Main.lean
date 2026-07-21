@@ -1,43 +1,50 @@
-import ModelAssetGuard.Quant.LayerBound
+import ModelAssetGuard.RustSidecar
 import Init.System.IO
-import Init.Data.List.Basic
-import Init.Data.String.Basic
 
+open ModelAssetGuard.RustSidecar
+
+/--
+QuantBound Lean CLI.
+
+Requires a real LayerSpec JSON describing model layers. Delegates to
+`guardd_quant128` — does not substitute hardcoded sample layers.
+-/
 def main (args : List String) : IO UInt32 := do
+  let args := stripLakeDashDash args
   match args with
   | [] => do
-    IO.println "Usage: quant-bound <model_path> [--output <file>] [--verify] [--tolerance <value>]"
+    IO.println "Usage: quantbound <layers.json> [--output <file>] [--verify]"
+    IO.println ""
+    IO.println "layers.json must contain real layer payloads:"
+    IO.println "  [{\"name\", \"weights\", \"fan_in\", \"fan_out\", \"quant_type\"}, ...]"
+    IO.println ""
+    IO.println "This CLI no longer invents sample layers. Provide weights from your model"
+    IO.println "(e.g. export via Python ModelAssetGuard / state_dict dump)."
+    IO.println ""
+    IO.println "Build helper:"
+    IO.println "  cargo build --release --manifest-path src/rust/guardd/Cargo.toml --bin guardd_quant128"
     return 1
-  | modelPath :: rest => do
-    let mut outputFile := none
-    let mut verify := false
-    let mut tolerance := 1e-6
-
-    -- Parse arguments
-    let mut i := 0
+  | path :: rest => do
+    -- Accept and ignore legacy --verify / --tolerance flags after validating them.
+    let mut outArgs : Array String := #[path]
+    let mut i : Nat := 0
     while i < rest.length do
-      match rest.get? i with
-      | some "--output" =>
-        match rest.get? (i + 1) with
-        | some file =>
-          outputFile := some file
+      match rest[i]? with
+      | some "--output" | some "-o" =>
+        match rest[i + 1]? with
+        | some p =>
+          outArgs := outArgs.push "--output" |>.push p
           i := i + 2
         | none => do
-          IO.println "Error: --output requires a value"
+          IO.println "Error: --output requires a path"
           return 1
       | some "--verify" =>
-        verify := true
         i := i + 1
       | some "--tolerance" =>
-        match rest.get? (i + 1) with
-        | some tol =>
-          match String.toFloat? tol with
-          | some t =>
-            tolerance := t
-            i := i + 2
-          | none => do
-            IO.println "Error: --tolerance requires a numeric value"
-            return 1
+        match rest[i + 1]? with
+        | some _ =>
+          IO.println "Warning: --tolerance is ignored; Rust epsilon bounds are used."
+          i := i + 2
         | none => do
           IO.println "Error: --tolerance requires a value"
           return 1
@@ -46,48 +53,9 @@ def main (args : List String) : IO UInt32 := do
         return 1
       | none => break
 
-    -- Create sample layer configurations (in practice, this would parse the model)
-    let layers := [
-      ("layer1", LayerConfig.mk 512 512 "int8"),
-      ("layer2", LayerConfig.mk 512 512 "int8"),
-      ("layer3", LayerConfig.mk 512 512 "fp16")
-    ]
-
-    -- Generate bounds
-    let bounds := layers.map fun (name, config) =>
-      (name, compute_epsilon_bound config)
-
-    -- Output results
-    if verify then
-      IO.println "Verifying quantization bounds..."
-      let mut allPassed := true
-      for (name, bound) in bounds do
-        let passed := bound ≤ tolerance
-        if passed then
-          IO.println s!"✓ {name}: {bound} ≤ {tolerance}"
-        else
-          IO.println s!"✗ {name}: {bound} > {tolerance}"
-          allPassed := false
-
-      if allPassed then
-        IO.println "All layers passed verification"
-        return 0
-      else
-        IO.println "Some layers failed verification"
-        return 1
-    else
-      IO.println "Generated quantization bounds:"
-      for (name, bound) in bounds do
-        IO.println s!"  {name}: ε ≤ {bound}"
-
-      -- Write to file if specified
-      match outputFile with
-      | some file => do
-        let content := bounds.map fun (name, bound) =>
-          s!"\"{name}\": {bound}" |>.join ",\n"
-        let json := s!"{{\n{content}\n}}"
-        IO.FS.writeFile file json
-        IO.println s!"Bounds written to {file}"
-      | none => pure ()
-
-      return 0
+    -- Fail closed if the layers file is missing (do not fall back to samples).
+    let fp : System.FilePath := path
+    if !(← fp.pathExists) then
+      IO.println s!"Error: layers file not found: {path}"
+      return 1
+    runExitCode "guardd_quant128" outArgs
