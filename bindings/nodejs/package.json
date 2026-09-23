@@ -14,7 +14,7 @@
     "fetch-native": "node fetch_native.js"
   },
   "dependencies": {
-    "koffi": "^2.9.0"
+    "koffi": "^3.3.1"
   },
   "files": [
     "node_guard.js",
